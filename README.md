@@ -1,6 +1,6 @@
 # Block_TD_block_sparse
 
-###Download this readme for it to look nicer
+###Download this readme for it to look nicer or put in "raw"-mode in the right-hand corner
 
 Matrix classes for matrices that are block-tridiagonal and sparse, and simply "block sparse" - meaning they only have a few non-zero blocks. 
 
