@@ -1,4 +1,7 @@
 # Block_TD_block_sparse
+
+###Download this readme for it to look nicer
+
 Matrix classes for matrices that are block-tridiagonal and sparse, and simply "block sparse" - meaning they only have a few non-zero blocks. 
 
 Contains inversion algorithm for a block-tridiagonal matrix as the the one found in found in e.g. "Matthew G Reuter and Judith C Hill An efficient, 
