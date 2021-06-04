@@ -80,6 +80,7 @@ print(D.TrProd(D))
 #################################
 
 ### Lets make a "A0-A1-A1-A2-A3" Block-tridiagonal matrix
+
 ´´´
 s1 = 2
 s2 = 4
@@ -94,7 +95,8 @@ Cl = [r((3,s1,s2)),r((3,s2,s2)),r((3,s2,s1)),r((3,s1,s1))]; Ic = [0,1,2,3]
 
 BTD = block_td(Al,Bl,Cl,Ia,Ib,Ic)
 iBTD = BTD.Invert()
-```
+´´´
+
 
 ### Taking the trace of the their product, we should hopefully be taking the trace of the identity-matrix
 ###which should yield the dimension of the matrix: 
