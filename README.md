@@ -80,7 +80,7 @@ print(D.TrProd(D))
 #################################
 
 ### Lets make a "A0-A1-A1-A2-A3" Block-tridiagonal matrix
-``´
+´´´
 s1 = 2
 s2 = 4
 a0 = r((3,s1,s1))
