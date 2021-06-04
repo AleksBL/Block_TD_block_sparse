@@ -14,8 +14,8 @@ You should just the the "Block_matrices.py"-script and put it in a folder where 
 The basic workings are as described below, but can also do a bit more advanced stuff, like interpolation in the second index. 
 It can have "arrays" with up to five indecies, where the two last are the matrix like ones, and the rest works like numpy broadcasting
 
-#How to do calculations
-#(Start of python-code)
+## How to do calculations
+## (Start of python-code)
 ```
 import numpy as np
 from Block_matrices import block_sparse, block_td
@@ -24,7 +24,7 @@ r = np.random.random
 ```
 
 
-###Matrix  A : 
+## Matrix  A : 
 ```
 block_shape = (3,3)
 vals = [r((3,5,5)), r((3,5,5)),r((3,5,5))]
@@ -32,7 +32,7 @@ inds = [[0,0],[1,2],[2,2]]
 A = block_sparse(inds,vals,block_shape)
 ```
 
-###Matrix B: 
+## Matrix B: 
 ```
 block_shape = (3,3)
 vals = [r((3,5,5)),r((3,5,5))]
@@ -40,12 +40,12 @@ inds = [[0,0],[2,0]]
 B = block_sparse(inds,vals,block_shape)
 ```
 
-####We can do matrix multiplication with the, where only the 
-####two last indecies count as matrix indecies, the rest uses numpy's broadcasting
+#### We can do matrix multiplication with the, where only the 
+#### two last indecies count as matrix indecies, the rest uses numpy's broadcasting
 ```
 C = A.BDot(B)
 ```
-##### We can copy arrays
+#### We can copy arrays
 ```
 C2 = C.copy()
 #but only tranpose them manually, which modifies all the values
@@ -58,13 +58,13 @@ for i in range(2):
     D.do_transposition()
 ```
 
-####We can to a trace
+#### We can to a trace
 ```
 print(D.Tr())
 ```
 
 
-####We can do a trace with a product of itself (and of course any other matrix with the same block-shape)
+#### We can do a trace with a product of itself (and of course any other matrix with the same block-shape)
 ```
 print(D.TrProd(D))
 ```
@@ -79,7 +79,7 @@ print(D.TrProd(D))
 ## The "Block-tridiagonal" part##
 #################################
 
-###Lets make a "A0-A1-A1-A2-A3" Block-tridiagonal matrix
+### Lets make a "A0-A1-A1-A2-A3" Block-tridiagonal matrix
 ``´
 s1 = 2
 s2 = 4
@@ -96,13 +96,14 @@ BTD = block_td(Al,Bl,Cl,Ia,Ib,Ic)
 iBTD = BTD.Invert()
 ```
 
-### taking the trace of the their product, we should hopefully be taking the trace of the identity-matrix
-### which should yield the dimension of the matrix: 
+### Taking the trace of the their product, we should hopefully be taking the trace of the identity-matrix
+###which should yield the dimension of the matrix: 
+
 ```
 print(BTD.TrProd(iBTD))
 ```
 
-###The individual blocks of the matrix is accessed as
+### The individual blocks of the matrix is accessed as
 ```
 P = BTD.Block(0,1)
 plt.matshow(P[0,:,:])
