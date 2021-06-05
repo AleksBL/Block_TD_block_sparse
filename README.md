@@ -182,7 +182,7 @@ s3 = time()
 print('five dense inversions took : ',  s2-s1, ' seconds')
 print('five BTD inversions took : ',  s3-s2, ' seconds')
 
-#check which block you want (of) the diagonals at least:
+#check which block you want (of the diagonals at least, but more if you change BW to something else):
 i,j  = 2,2
 si, sj =  BTD.all_slices[i][j]
 
