@@ -66,10 +66,9 @@ print(D.Tr())
 print(D.TrProd(D))
 ```
 
-
-###The block_sparse class can only really do matrix-multiplication and traces. 
-###Matrices should be have a lot of zeros for this to be efficient, as the for python-for loops will become apparent if there are 
-###many nonzero entries
+the block_sparse class can only do matrix-multiplication and traces (and maybe more more if anybody asks). 
+Matrices should be have a lot of zeros for this to be efficient, as the python-for loops will become apparent if there are 
+many nonzero entries
 
 ## The "Block-tridiagonal" part
 
