@@ -126,4 +126,69 @@ iFull = np.linalg.inv(Full)
 i,j  = 0,2
 
 print(np.isclose(iBTD.Block(i,j),iFull[:,S[i]:S[i+1],S[j]:S[j+1]]).all())
+
+
+
+```
+## This algorthm is does of course also work on small matrices, but the advatantages over normal inversion of dense matrices is evident when considering e.g a 2000 x 2000 matrix and we restrict ourselves to e.g. the diagonal blocks:
+
+
+```
+from Block_matrices import block_td
+import numpy  as np
+from time import time
+
+inv = np.linalg.inv
+r = np.random.random
+D1     = 2
+D2     = 2
+N_test = 20
+
+
+S      = [np.random.randint(100,120) for i in range(N_test)]
+Ia=[i for i in range(N_test   )]
+Ib=[i for i in range(N_test-1 )]
+Ic=[i for i in range(N_test-1 )]
+
+Al = [r((D1,D2,S[i  ],S[i]))+1j*r((D1,D2,S[i  ],S[i])) for i in range(N_test)]
+Bl = [r((D1,D2,S[i+1],S[i]))+1j*r((D1,D2,S[i+1],S[i])) for i in range(N_test-1)]
+Cl = [r((D1,D2,S[i],S[i+1]))+1j*r((D1,D2,S[i],S[i+1])) for i in range(N_test-1)]
+
+Full  = np.zeros((D1,D2,sum(S),sum(S)),dtype=np.complex128)
+Slices=[]
+SUM=0
+
+for i in range(N_test):
+    Slices+=[slice(SUM,SUM+S[i])]
+    SUM+=S[i]
+
+for i in range(N_test):
+    Full[:,:,Slices[i],Slices[i]]  = Al [i]
+    if i<N_test-1:
+        Full [:,:,Slices[i],Slices[i+1]]  =  Cl [i]
+        Full [:,:,Slices[i+1],Slices[i]]  =  Bl [i]
+        
+
+BTD  = block_td(Al,Bl,Cl,Ia,Ib,Ic, 
+                )
+s1 = time()
+for i in range(5):
+    iFull = inv(Full)
+
+s2 = time()
+for i in range(5):
+    iBTD = BTD.Invert( BW= 0)# BW = 0 means the diagonal
+s3 = time()
+print('five dense inversions took : ',  s2-s1, ' seconds')
+print('five BTD inversions took : ',  s3-s2, ' seconds')
+
+#check which block you want (of) the diagonals at least:
+i,j  = 2,2
+si, sj =  BTD.all_slices[i][j]
+
+print('elements close: ',np.isclose(iFull[..., si,sj], iBTD.Block(i,j)).all() )
+
+
+
+
 ```
