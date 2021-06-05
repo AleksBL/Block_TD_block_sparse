@@ -3,8 +3,7 @@
 Matrix classes for matrices that are block-tridiagonal and zero elsewhere, and simply "block sparse" - meaning they only have a few non-zero blocks, for which the data is stored in numpy arrays here. We are somewhere between the sparse scipy-class, but with some of the speed that comes with smaller dense arrays. These types of matrices are often seen in models for electronic structure in a localised orbital basis when studying crystals.
 
 Contains inversion algorithm for a block-tridiagonal matrix as the the one found in found in e.g. "Matthew G Reuter and Judith C Hill An efficient, 
-block-by-block algorithm for inverting a block tridiagonal, nearly block Toeplitz matrix" (the simple, nontoeplitz one, I havent looked at the original paper, 
-sorry whomever came up with the algorithm) .  
+block-by-block algorithm for inverting a block tridiagonal, nearly block Toeplitz matrix" and "Improvements on non-equilibrium and transport Green function techniques: The next-generation TRANSIESTA" by: Nick Rübner Papior, Nicolás Lorente, Thomas Frederiksen, Alberto García, Mads Brandbyge (sorry whomever came up with the algorithm, havent found the original paper).  
 
 Relies on numpy broadcasting meaning the block matrix can be of (K,L,N,i,j), where i,j are the actual matrix indecies. 
 
