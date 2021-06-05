@@ -1,7 +1,5 @@
 # Block_TD_block_sparse
 
-###Download this readme for it to look nicer or put in "raw"-mode in the right-hand corner
-
 Matrix classes for matrices that are block-tridiagonal and zero elsewhere, and simply "block sparse" - meaning they only have a few non-zero blocks, for which the data is stored in numpy arrays here. We are somewhere between the sparse scipy-class, but with some of the speed that comes with smaller dense arrays.  
 
 Contains inversion algorithm for a block-tridiagonal matrix as the the one found in found in e.g. "Matthew G Reuter and Judith C Hill An efficient, 
