@@ -130,8 +130,8 @@ print(np.isclose(iBTD.Block(i,j),iFull[:,S[i]:S[i+1],S[j]:S[j+1]]).all())
 
 
 ```
-## This algorthm is does of course also work on small matrices, but the advatantages over normal inversion of dense matrices is evident when considering e.g a 2000 x 2000 matrix and we restrict ourselves to e.g. the diagonal blocks:
-
+### This algorthm is does of course also work on small matrices, but the advatantages over normal inversion of dense matrices is evident when considering e.g a 2000 x 2000 matrix and we restrict ourselves to e.g. the diagonal blocks:
+#This script should take about a minute:
 
 ```
 from Block_matrices import block_td
