@@ -85,7 +85,8 @@ a0 = r((3,s1,s1))
 a1 = r((3,s2,s2))
 a2 = r((3,s1,s1))
 a3 = r((3,s1,s1))
-Al = [a0,a1,a2,a3];                                 Ia = [0,1,1,2,3]
+
+Al = [a0, a1, a2, a3];                                      Ia = [0,1,1,2,3] # Notice we can place the same block several places
 Bl = [r((3,s2,s1)),r((3,s2,s2)),r((3,s1,s2)),r((3,s1,s1))]; Ib = [0,1,2,3]
 Cl = [r((3,s1,s2)),r((3,s2,s2)),r((3,s2,s1)),r((3,s1,s1))]; Ic = [0,1,2,3]
 
