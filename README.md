@@ -9,6 +9,9 @@ Relies on numpy broadcasting meaning the block matrix can be of (K,L,N,i,j), whe
 
 You should just the the "Block_matrices.py"-script and put it in a folder where you want to do your calculations
 The basic workings are as described below, but can also do a bit more advanced stuff, like interpolation in the second index. and matrices from the scipy sparse format
+
+The python package "sparse" will also be implemented at some point. 
+
 ## Write to abalo@dtu.dk if you want something implemented
 
 ## How to do calculations
