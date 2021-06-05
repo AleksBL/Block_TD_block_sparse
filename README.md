@@ -72,10 +72,7 @@ print(D.TrProd(D))
 ###Matrices should be have a lot of zeros for this to be efficient, as the for python-for loops will become apparent if there are 
 ###many nonzero entries
 
-
-#################################
-## The "Block-tridiagonal" part##
-#################################
+## The "Block-tridiagonal" part
 
 ### Lets make a "A0-A1-A1-A2-A3" Block-tridiagonal matrix
 ```
