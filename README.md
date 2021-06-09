@@ -8,7 +8,7 @@ block-by-block algorithm for inverting a block tridiagonal, nearly block Toeplit
 Relies on numpy broadcasting meaning the block matrix can be of (K,L,N,i,j), where i,j are the actual matrix indecies. 
 
 You should just the the "Block_matrices.py"-script and put it in a folder where you want to do your calculations
-The basic workings are as described below, but can also do a bit more advanced stuff, like interpolation in the second index, make matrices from the scipy sparse format, and sisl objects.
+The basic workings are as described below, but can also do a bit more advanced stuff, like interpolation in the second index, make matrices from the scipy sparse format, and sisl Hamiltonians.
 
 The python package "sparse" will also be implemented at some point. 
 
