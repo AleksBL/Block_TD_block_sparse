@@ -194,12 +194,12 @@ A handy function for testing is the "Blocksparse2Numpy" function, which takes a 
 
 ```
 from Block_matrices import Blocksparse2Numpy
-
+iBTD = BTD.Invert(); # find all blocks of inverse
 BTD_dense = Blocksparse2Numpy(BTD, BTD.all_slices)
-print('BTD converted to dense is close to Full: ', np.isclose(BTD_dense, Full).all()
+print('BTD converted to dense is close to Full: ', np.isclose(BTD_dense, Full).all())
 
 iBTD_dense = Blocksparse2Numpy(iBTD, BTD.all_slices) # note the iBTD does not have the "all_slices" attribute, but it shares it will BTD
-print('BTD converted to dense is close to Full: ', np.isclose(iBTD_dense, iFull).all()
+print('BTD converted to dense is close to Full: ', np.isclose(iBTD_dense, iFull).all())
 
 
 
