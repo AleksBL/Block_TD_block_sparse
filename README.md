@@ -178,7 +178,7 @@ for i in range(5):
 
 s2 = time()
 for i in range(5):
-    iBTD = BTD.Invert( BW= 0)# BW = 0 means the diagonal
+    iBTD = BTD.Invert( BW= 0)# BW = 0 means the diagonal, and can take several different keywords, look at the function in Block_matrices.py
 s3 = time()
 print('five dense inversions took : ',  s2-s1, ' seconds')
 print('five BTD inversions took : ',  s3-s2, ' seconds')
