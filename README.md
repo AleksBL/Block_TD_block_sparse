@@ -189,7 +189,18 @@ si, sj =  BTD.all_slices[i][j]
 
 print('elements close: ',np.isclose(iFull[..., si,sj], iBTD.Block(i,j)).all() )
 
-
-
+```
+A handy function for testing is the "Blocksparse2Numpy" function, which takes a block_sparse or block_td class and returns the equivalent dense numpy array:
 
 ```
+from Block_matrices import Blocksparse2Numpy
+
+BTD_dense = Blocksparse2Numpy(BTD, BTD.all_slices)
+print('BTD converted to dense is close to Full: ', np.isclose(BTD_dense, Full).all()
+
+iBTD_dense = Blocksparse2Numpy(iBTD, BTD.all_slices) # note the iBTD does not have the "all_slices" attribute, but it shares it will BTD
+print('BTD converted to dense is close to Full: ', np.isclose(iBTD_dense, iFull).all()
+
+
+
+
