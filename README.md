@@ -5,6 +5,8 @@ Matrix classes for matrices that are block-tridiagonal and zero elsewhere, and s
 Contains inversion algorithm for a block-tridiagonal matrix as the the one found in found in e.g. "Matthew G Reuter and Judith C Hill An efficient, 
 block-by-block algorithm for inverting a block tridiagonal, nearly block Toeplitz matrix" and "Improvements on non-equilibrium and transport Green function techniques: The next-generation TRANSIESTA" by: Nick Rübner Papior, Nicolás Lorente, Thomas Frederiksen, Alberto García, Mads Brandbyge (sorry whomever came up with the algorithm, havent found the original paper).  
 
+Inversion is a pesky O(2.4) operation, meaning it is favorable use the block-tridiagonal structure of a matrix if it happens to be structured in such a way.
+
 Relies on numpy broadcasting meaning the block matrix can be of (K,L,N,i,j), where i,j are the actual matrix indecies. 
 
 You should just the the "Block_matrices.py"-script and put it in a folder where you want to do your calculations
