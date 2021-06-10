@@ -14,6 +14,8 @@ The basic workings are as described below, but can also do a bit more advanced s
 
 The python package "sparse" will also be implemented at some point. 
 
+Also, see [siesta_python](https://github.com/AleksBL/siesta_python) for how to get the greens function for an electronic structure in this format
+
 ## Write to abalo@dtu.dk if you want something implemented
 
 ## How to do calculations
