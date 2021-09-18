@@ -8,9 +8,17 @@ Created on Mon Jan 18 19:35:11 2021
 import numpy as np
 import sparse
 from scipy import sparse as sp
-from numba import njit, jit
+from numba import njit, jit, prange
+#from numba.typed import List
 from joblib import Parallel, delayed
 import gc
+from funcs import unique_list, find_list
+import multiprocessing as MP
+from scipy.linalg import sqrtm
+from Croy import Matrix_lorentzian_basis, evaluate_Lorentz_basis_matrix
+#import os
+
+
 
 Inv   = np.linalg.inv
 Solve = np.linalg.solve
@@ -27,7 +35,7 @@ def get_divisors(n):
             div+=[i]
     return div
 
-def test_partition_2d_sparse_matrix(A,P,tol = 1e-5,sparse=True):
+def test_partition_2d_sparse_matrix(A,P,tol = 1e-5,sparse=True, only_slices = False):
     assert P[-1]==A.shape[0]==A.shape[1]
     
     if sparse==True:
@@ -37,12 +45,18 @@ def test_partition_2d_sparse_matrix(A,P,tol = 1e-5,sparse=True):
         Slices_a = [ [slice(P[i],P[i+1]),slice(P[i],P[i+1])] for i in range(N-1)   ]
         Slices_b = [ [slice(P[i],P[i+1]),slice(P[i-1],P[i])] for i in range(1,N-1) ]
         Slices_c = [ [slice(P[i-1],P[i]),slice(P[i],P[i+1])] for i in range(1,N-1) ]
-        Abs=0
+        if only_slices:
+            return 1.0, [Slices_a,Slices_b,Slices_c]
+        
+        Abs = 0.0
+        
+        
         for i in range(N-1):
             Abs+=np.abs(A[Slices_a[i][0],Slices_a[i][1]].todense()).sum()
             if i<N-2:
                 Abs+=np.abs(A[Slices_b[i][0],Slices_b[i][1]].todense()).sum()
                 Abs+=np.abs(A[Slices_c[i][0],Slices_c[i][1]].todense()).sum()
+        
         return Abs/ABS,[Slices_a,Slices_b,Slices_c]
 
 def Transpose(A):
@@ -67,7 +81,6 @@ def Transpose(A):
             return A.transpose(axes = (0,1,2,4,3))
 
 def Build_BTD(A,Slices):
-    
     Al = []; Bl = []; Cl = []
     Ia = []; Ib = []; Ic = []
     N=len(Slices[0])
@@ -78,6 +91,7 @@ def Build_BTD(A,Slices):
     I,J,V = sp.find(A)
     Is = np.intersect1d
     Wh = np.where
+    
     for i in range(N):
         ia = Sa[i][0]; ja = Sa[i][1]
         a = np.zeros((ia.stop-ia.start,ja.stop-ja.start),dtype = dt)
@@ -105,6 +119,130 @@ def Build_BTD(A,Slices):
             Ic+=[i]
     
     return Al,Bl,Cl,Ia,Ib,Ic
+
+def slices_to_npslices(Slices):
+    N = len(Slices[0])
+    np_slices = np.zeros((3,N, 2,2),dtype = np.int32)
+    Sa = Slices[0]
+    Sb = Slices[1]
+    Sc = Slices[2]
+    
+    for i in range(N):
+        ia = Sa[i][0]; ja = Sa[i][1]
+        np_slices[0,i,0,:]  = ia.start,ia.stop
+        np_slices[0,i,1,:]  = ja.start,ja.stop
+        if i<N-1:
+            ib = Sb[i][0]; jb = Sb[i][1]
+            ic = Sc[i][0]; jc = Sc[i][1]
+            np_slices[1,i,0,:]  = ib.start,ib.stop
+            np_slices[1,i,1,:]  = jb.start,jb.stop
+            np_slices[2,i,0,:]  = ic.start,ic.stop
+            np_slices[2,i,1,:]  = jc.start,jc.stop
+    return np_slices
+
+@njit(cache = True)
+def delete_workaround(arr, num):
+    nn = len(num)
+    na = len(arr)
+    
+    res = np.zeros(na - nn, dtype = np.int32)
+    it = 0
+    ti = 0
+    for i in range(na):
+        if i==num[it]:# and it<nn-1:
+            if it < nn-1:
+                it+=1
+        else:
+            res[ti] = i
+            ti += 1
+    
+    return arr[res]
+
+@njit(cache = True)
+def Build_BTD_purenp(I, J, V, Slices):
+    #Input from scipy.spars.find(A), together with the way the matrix is partitioned into blocks
+    # Al = List(); Bl =List(); Cl = List()
+    Al = []; Bl = []; Cl = []
+    Al.append(np.zeros((1,1), dtype = V.dtype))
+    Bl.append(np.zeros((1,1), dtype = V.dtype))
+    Cl.append(np.zeros((1,1), dtype = V.dtype))
+    
+    Ia = []; Ib = []; Ic = []
+    
+    Ia.append(np.int(1))
+    Ib.append(np.int(1))
+    Ic.append(np.int(1))
+    
+    N  = len(Slices[0])
+    Sa = Slices[0]
+    Sb = Slices[1]
+    Sc = Slices[2]
+    dt = V.dtype 
+    
+    for i in range(N):
+        
+        ia = Sa[i,0]; ja = Sa[i,1]
+        ia_start,ia_stop = ia[0], ia[1] 
+        ja_start,ja_stop = ja[0], ja[1] 
+        
+        a = np.zeros((ia_stop-ia_start,ja_stop-ja_start),dtype = dt)
+        inds_a  = np.where( (I>=ia_start) * (I<ia_stop) * (J>=ja_start) * (J<ja_stop) )#[0]
+        
+        li = I[inds_a]-ia_start
+        lj = J[inds_a]-ja_start
+        v  = V[inds_a]
+        
+        for k  in range(len(li)):
+            a[li[k], lj[k]] = v[k]
+        
+        Al.append( a )
+        
+        if i<N-1:
+            ib = Sb[i, 0]; jb = Sb[i, 1]
+            ic = Sc[i, 0]; jc = Sc[i, 1]
+            
+            ib_start,ib_stop = ib[0], ib[1] 
+            jb_start,jb_stop = jb[0], jb[1] 
+            ic_start,ic_stop = ic[0], ic[1] 
+            jc_start,jc_stop = jc[0], jc[1] 
+            
+            b = np.zeros((ib_stop-ib_start,jb_stop-jb_start),dtype = dt)
+            inds_b =  np.where( (I>=ib_start) * (I<ib_stop) * (J>=jb_start) * (J<jb_stop) )#[0]
+            li_b = I[inds_b]-ib_start
+            lj_b = J[inds_b]-jb_start
+            v_b  = V[inds_b]
+            
+            c = np.zeros((ic_stop-ic_start,jc_stop-jc_start),dtype = dt)
+            inds_c = np.where( (I>=ic_start) * (I<ic_stop) * (J>=jc_start) * (J<jc_stop) )#[0]
+            li_c = I[inds_c]-ic_start
+            lj_c = J[inds_c]-jc_start
+            v_c  = V[inds_c]
+            
+            for k in range(len(li_b)):
+                b[li_b[k], lj_b[k]] = v_b[k]
+                c[li_c[k], lj_c[k]] = v_c[k]                
+            
+            Bl.append( b )
+            
+            Cl.append( c )
+            
+        
+        
+    
+    return Al[1:], Bl[1:], Cl[1:]#,Ia[1:],Ib[1:],Ic[1:]
+
+# def csr_to_ijv(indptr, ld):
+#     i = np.zeros(ld, dtype = np.int32)
+#     l = len(indptr)-1
+#     for i in range(l):
+#         i[indptr[]]
+# A   = sp.random(1000,1000, 0.0); A=A.tocsr(); A [100:250,100:250] = np.random.random((150,150))
+# f,S = test_partition_2d_sparse_matrix(A, [0,100,200,300,400,1000])
+# nS = slices_to_npslices(S)
+# i,j,v = sp.find(A)
+
+# A1,B1,C1,a1,b1,c1 = Build_BTD_purenp(i,j,v,nS)
+# A2,B2,C2,a2,b2,c2 = Build_BTD(A,S)
 
 def Build_BS(A,P):
     vals = []
@@ -134,8 +272,189 @@ def Build_BS(A,P):
                     if np.any(block):
                         vals+=[block.copy()]
                         inds+=[[i,j]]
+    
+    return inds, vals
+
+@njit(cache = True)
+def Build_BS_purenp(I, J, val, P):
+    vals = []#List()
+    inds = []#List()
+    vals.append(np.zeros((2,2),dtype = val.dtype))
+    inds.append(np.array([2, 2],dtype = np.int32))
+    
+    minI = np.min(I); maxI = np.max(I)
+    minJ = np.min(J); maxJ = np.max(J)
+    N = P.shape[0]-1
+    
+    for i in prange(N):
+        Ti1 = P[i]<minI and P[i+1]<minI
+        Ti2 = P[i]>maxI and P[i+1]>maxI  
+        if not Ti1 and not Ti2:
+            i_start, i_stop = P[i], P[i+1]
+            for j in range(N):
+                Tj1 = P[j]<minJ and P[j+1]<minJ
+                Tj2 = P[j]>maxJ and P[j+1]>maxJ
                 
-    return inds,vals
+                if not Tj1 and not Tj2:
+                    #Sj = slice(P[j],P[j+1])
+                    j_start, j_stop = P[j], P[j+1]
+                    block = np.zeros((i_stop-i_start,j_stop-j_start), dtype = val.dtype)
+                    idx  = np.where(  (I>=i_start) * (I<i_stop) * (J>=j_start) * (J<j_stop)  )
+                    li = (I-i_start)[idx]
+                    lj = (J-j_start)[idx]
+                    v  = val[idx]
+                    for k in range(len(li)):
+                        block[li[k], lj[k]] = v[k]
+                    
+                    #print(li,lj)
+                    ij = np.array([i,j],dtype = np.int32)
+                    if np.any(block):
+                        vals.append(block)
+                        inds.append(ij)
+    return inds[1:], vals[1:]
+
+# import matplotlib.pyplot as plt
+# i,j,v = sp.find(A)
+
+# P = np.array([0,100,200,300,400,1000], dtype = np.int32)
+# inds, vals = Build_BS_purenp(i, j, v, P)
+# inds = list(inds)
+# vals = list(vals)
+
+
+
+
+
+
+# A   = sp.random(1000,1000, 0.0); A=A.tocsr(); A [100:250,100:250] = np.random.random((150,150))
+# f,S = test_partition_2d_sparse_matrix(A, [0,100,200,300,400,1000])
+# nS  = slices_to_npslices(S)
+# i,j,v = sp.find(A)
+
+# A1,B1,C1,a1,b1,c1 = Build_BTD_purenp(i,j,v,nS)
+# A2,B2,C2,a2,b2,c2 = Build_BTD(A,S)
+# def naive_BTD():
+#     for i in range(len(vv)):
+#         Build_BTD(A,S)
+
+# def naive_BS():
+#     for i in range(len(vv)):
+#         Build_BS(A,list(P))
+    
+
+
+@njit(parallel = True, cache = True)
+def _Build_BTD_vectorised(Iv, Jv, Vv, Slices):
+    nv = Iv.shape[0]
+    dt = Vv.dtype
+    # Alv = List(); Blv =List(); Clv = List()
+    Alv = []; Blv = []; Clv = [];
+    Alv.append(np.zeros((1,1,1), dtype = dt))
+    Blv.append(np.zeros((1,1,1), dtype = dt))
+    Clv.append(np.zeros((1,1,1), dtype = dt))
+    
+    N  = len(Slices[0])
+    Sa = Slices[0]
+    Sb = Slices[1]
+    Sc = Slices[2]
+     
+    
+    for i in range(N):
+        ia = Sa[i,0]; ja = Sa[i,1]
+        ia_start,ia_stop = ia[0], ia[1] 
+        ja_start,ja_stop = ja[0], ja[1] 
+        
+        a = np.zeros((nv, ia_stop-ia_start,ja_stop-ja_start),dtype = dt)
+        Alv.append( a )
+        if i<N-1:
+            ib = Sb[i, 0]; jb = Sb[i, 1]
+            ic = Sc[i, 0]; jc = Sc[i, 1]
+            
+            ib_start,ib_stop = ib[0], ib[1] 
+            jb_start,jb_stop = jb[0], jb[1] 
+            ic_start,ic_stop = ic[0], ic[1] 
+            jc_start,jc_stop = jc[0], jc[1]
+            
+            b = np.zeros((nv, ib_stop-ib_start,jb_stop-jb_start),dtype = dt)
+            Blv.append( b )
+            
+            c = np.zeros((nv, ic_stop-ic_start,jc_stop-jc_start),dtype = dt)
+            Clv.append( c )
+    Alv = Alv[1:]
+    Blv = Blv[1:]
+    Clv = Clv[1:]
+    
+    for i in prange(nv):
+        A ,B, C = Build_BTD_purenp(Iv[i], Jv[i], Vv[i], Slices)
+        for j in range(N):
+            Alv[j][i,:,:] = A[j]
+            if j < N-1:
+                Blv[j][i,:,:] = B[j]
+                Clv[j][i,:,:] = C[j]
+    
+    return Alv, Blv, Clv
+
+@njit(cache = True)
+def ind_in_inds(ind, inds, find_ind = False):
+    for i in range(len(inds)):
+        if (ind == inds[i]).all():
+            if find_ind == True:
+                return i
+            return True
+    return False
+
+@njit(parallel = True, cache = True)
+def _Build_BS_vectorised(Iv, Jv, Vv, P):
+    nv = Iv.shape[0]
+    dt = Vv.dtype
+    
+    i0, v0 = Build_BS_purenp(Iv[0,:], Jv[0,:], Vv[0,:], P)
+    
+    vals = []#List(); 
+    vals.append( np.zeros((1,1,1), dtype = dt ) ) 
+    inds = []#List(); 
+    inds.append( np.array([2,2]  , dtype = np.int32) )
+    
+    for i in range(len(i0)):
+        inds.append(i0[i])
+        vals.append(np.zeros((nv,) + v0[i].shape , dtype  = dt))
+    
+    inds = inds[1:]
+    vals = vals[1:]
+    
+    for i in prange(nv):
+        II, VI = Build_BS_purenp(Iv[i,:], Jv[i,:], Vv[i,:], P)
+        for j in range(len(II)):
+            ind, val = II[j], VI[j]
+            if not ind_in_inds(ind, inds):
+                inds.append( ind )
+                vals.append( np.zeros((nv,) + val.shape, dtype = dt) )
+            which = ind_in_inds(ind, inds, find_ind = True)
+            vals[which][i,:,:] = val[:,:]
+    
+    return inds, vals
+
+def Build_BS_vectorised(Iv, Jv, Vv, P):
+    o1,o2 = _Build_BS_vectorised(Iv, Jv, Vv, P)
+    return o1, o2
+
+def Build_BTD_vectorised(Iv, Jv, Vv, Slices):
+    #o1,o2,o3 = _Build_BTD_vectorised(Iv, Jv, Vv, Slices)
+    return _Build_BTD_vectorised(Iv, Jv, Vv, Slices)
+
+def split_sparr(A, N, n_jobs = 4):
+    ni = np.arange(0, A.shape[0])
+    slices = [[n.min(),n.max()+1] for n in np.split(ni, N)]
+    # print(np.split(ni))
+    Ai = [A[i[0]:i[1] , :] for i in slices]
+    pool   = MP.Pool(n_jobs)
+    result = pool.map(func = sp.find, iterable = Ai)
+    return result
+
+def sparse_find_faster(A):
+    B = A.tocoo()
+    # no fucking duplicates
+    return B.row, B.col, B.data
 
 def Find_copies(L,atol=1e-5,rtol = 1e-5):
     def equal(a,b):
@@ -169,12 +488,12 @@ class block_td:
     
     def __init__(self,Al,Bl,Cl,I_al,I_bl,I_cl,diagonal_zeros=False,E_grid = None):
         #Matrix-elements and shortcuts to their position in a list
-        self.Al=[a.copy() for a in Al]
-        self.Bl=[b.copy() for b in Bl]
-        self.Cl=[c.copy() for c in Cl]
-        self.I_al=I_al.copy()
-        self.I_bl=I_bl.copy()
-        self.I_cl=I_cl.copy()
+        self.Al = [a.copy() for a in Al]
+        self.Bl = [b.copy() for b in Bl]
+        self.Cl = [c.copy() for c in Cl]
+        self.I_al = I_al.copy()
+        self.I_bl = I_bl.copy()
+        self.I_cl = I_cl.copy()
         #Sanity checks
         assert len(I_bl)==len(I_cl)
         assert len(I_al)-1==len(I_cl)
@@ -182,17 +501,17 @@ class block_td:
         self.N=len(I_al)
         self.dt=Al[0].dtype
         self.num_vect_inds = len(Al[0].shape) - 2
+        
+        self.has_been_conjugated = False
+        self.has_been_transposed = False
+        
         #nonzero elements and check for block structure
         self.info(diagonal_zeros)
         self.Shape()
         #initialisations
-        self.has_been_conjugated=False
-        self.has_been_transposed=False
         self.diagonal_zeros=diagonal_zeros
         self.E_grid = E_grid
         ######
-        
-        
     
     def Find_Duplicates(self):
         #Thorough testing not done on this function
@@ -216,7 +535,7 @@ class block_td:
                 if i==j or i==j+1 or i+1==j:
                     if diagonal_zeros==False:
                         z+=[1]
-                    elif not all_zero(self.Block(i,j)):   #np.count_nonzero(self.Block(i,j))>0:
+                    elif not all_zero(self.Block(i,j)):
                         z+=[1]
                     else:
                         z+=[0]
@@ -236,10 +555,8 @@ class block_td:
                     nZ+=[all_slices[i][j]]
             nonzero_slices+=[nZ]
             
-        self.non_zero_slices = nonzero_slices
+        #self.non_zero_slices = nonzero_slices
         self.dtype = self.Al[0].dtype
-    # def Check_Duplicates(self):
-        
     
     def _Sequences_XY(self, Print='no', forget_tilde = False):
         self.Xs=[]; self.Xts=[]
@@ -334,12 +651,6 @@ class block_td:
         self.Xs = None
         gc.collect()
     
-    # def iM_old(self,i,j):
-    #     lind=inds_to_lind([i,j],self.inds)
-    #     if lind is not None:
-    #         return self.iMl[lind]
-    #     else: error()
-    
     def iM(self,i,j):
         try: 
             lind = self.iMl_dict[(i,j)]
@@ -350,7 +661,7 @@ class block_td:
             error()
     
     def Inverse_dot_v(self,v):
-        # No explicit inversion
+        # No explicit inversion, only 1 block at a time
         assert self.shape[-1] == v.shape[0]
         if len(v.shape) == 1:
             shape = self.shape[0:len(self.shape)-1]
@@ -401,7 +712,7 @@ class block_td:
                     it+=1
             
             
-            Res = block_sparse(self.inds.copy(),self.iMl.copy(),self.is_zero.shape,E_grid = self.E_grid)
+            Res = block_sparse(self.inds,self.iMl,self.is_zero.shape,E_grid = self.E_grid)
             self.Clean_inverse()
             return Res
         
@@ -423,7 +734,7 @@ class block_td:
                     self.iMl_dict.update({(m,n):it})
                     it+=1
                     
-            Res = block_sparse(self.inds.copy(),self.iMl.copy(),self.is_zero.shape,E_grid = self.E_grid)
+            Res = block_sparse(self.inds,self.iMl,self.is_zero.shape,E_grid = self.E_grid)
             self.Clean_inverse()
             return Res
         
@@ -476,32 +787,49 @@ class block_td:
                         self.inds+=[[m,n]]
                         self.iMl_dict.update({(m,n):it})
                         it+=1
-                    
+            
             self.do_transposition()
             Res = block_sparse(self.inds,self.iMl,self.is_zero.shape,E_grid = self.E_grid)
             Res.do_transposition()
             self.Clean_inverse()
             gc.collect()
             return Res
-        
-        elif BW[0:3]=='[\]':
-            if BW=='[\]':str_nn=''
-            else: str_nn=str(int(BW[3:]))
-            ResZ = self.Invert(BW='Z'+str_nn)
-            ResN = self.Invert(BW='N'+str_nn)
-            
-            vals_combined = ResZ.vals.copy()
-            inds_combined = ResZ.inds.copy()
-            is_zero_new = ResZ.is_zero.copy()
-            for IJ in ResN.inds:
-                if IJ not in ResZ.inds:
-                    inds_combined+=[IJ.copy()]
-                    vals_combined+=[ResN.Block(IJ[0],IJ[1]).copy()]
+        elif BW == 'Upper':
+            self.Gen_Inv_Diag()
+            #Regner alle elementer i inverse matrix
+            it = int(self.iMl_it)
+            for n in range(self.N):
+                for m in range(n+1,self.N):
+                    self.iMl +=[MM(-self.Xt(m-1),self.iM(m-1,n))]#[-self.Xt(m-1).dot(self.iM(m-1,n))]
+                    self.inds+=[[m,n]]
+                    self.iMl_dict.update({(m,n):it})
+                    it+=1
+                
+            Res = block_sparse(self.inds,self.iMl,self.is_zero.shape,E_grid = self.E_grid)
+            self.Clean_inverse()
+            return Res
                     
             
-            Res = block_sparse(inds_combined,vals_combined,ResZ.is_zero.shape,E_grid = self.E_grid)
-            gc.collect()
-            return Res
+        
+        
+        # elif BW[0:3]=='[\]':
+        #     if BW=='[\]':str_nn=''
+        #     else: str_nn=str(int(BW[3:]))
+        #     ResZ = self.Invert(BW='Z'+str_nn)
+        #     ResN = self.Invert(BW='N'+str_nn)
+            
+        #     vals_combined = ResZ.vals.copy()
+        #     inds_combined = ResZ.inds.copy()
+        #     is_zero_new = ResZ.is_zero.copy()
+        #     for IJ in ResN.inds:
+        #         if IJ not in ResZ.inds:
+        #             inds_combined+=[IJ.copy()]
+        #             vals_combined+=[ResN.Block(IJ[0],IJ[1]).copy()]
+                    
+            
+        #     Res = block_sparse(inds_combined,vals_combined,ResZ.is_zero.shape,E_grid = self.E_grid)
+        #     gc.collect()
+        #     return Res
         
         elif BW[0:3]=='*\*':
             if BW=='*\*':nn=0
@@ -573,18 +901,16 @@ class block_td:
             
                 
             
-            
-            
-            
-            Res = block_sparse(self.inds.copy(),self.iMl.copy(),self.is_zero.shape,E_grid = self.E_grid)
+            Res = block_sparse(self.inds,self.iMl,self.is_zero.shape,E_grid = self.E_grid)
             self.Clean_inverse()
             gc.collect()
             return Res
+        
         elif BW[0:4]=='diag':
             which_n = BW[4:].split()
             which_n = [int(i) for i in which_n]
             self.Gen_Inv_Diag(which_n = which_n,forget_tilde = True)
-            Res = block_sparse(self.inds.copy(),self.iMl.copy(),self.is_zero.shape,E_grid = self.E_grid)
+            Res = block_sparse(self.inds,self.iMl,self.is_zero.shape,E_grid = self.E_grid)
             self.Clean_inverse()
             gc.collect()
             return Res
@@ -607,15 +933,48 @@ class block_td:
         else:
             return None
     
-    def A(self,n):
+    def _A(self,n):
         if n<0 or n>self.N-1:print('Index error A'); error()
         return self.Al[self.I_al[n]]
-    def B(self,n):
+    
+    def _B(self,n):
         if n<0 or n>self.N-2:print('Index error B'); error()
         return self.Bl[self.I_bl[n]]
-    def C(self,n):
+    
+    def _C(self,n):
         if n<0 or n>self.N-2:print('Index error C'); error()
         return self.Cl[self.I_cl[n]]
+    
+    def A(self, n):
+        if self.has_been_transposed == False and self.has_been_conjugated == False:
+            return self._A(n)
+        if self.has_been_transposed == False and self.has_been_conjugated == True:
+            return np.conj(self._A(n))
+        if self.has_been_transposed == True  and self.has_been_conjugated == False:
+            return Transpose(self._A(n))
+        if self.has_been_transposed == True  and self.has_been_conjugated == True:
+            return np.conj(Transpose(self._A(n)))
+    
+    def B(self, n):
+        if self.has_been_transposed == False and self.has_been_conjugated == False:
+            return self._B(n)
+        if self.has_been_transposed == False and self.has_been_conjugated == True:
+            return np.conj(self._B(n))
+        if self.has_been_transposed == True  and self.has_been_conjugated == False:
+            return Transpose(self._C(n))
+        if self.has_been_transposed == True  and self.has_been_conjugated == True:
+            return np.conj(Transpose(self._C(n)))
+    
+    def C(self, n):
+        if self.has_been_transposed == False and self.has_been_conjugated == False:
+            return self._C(n)
+        if self.has_been_transposed == False and self.has_been_conjugated == True:
+            return np.conj(self._C(n))
+        if self.has_been_transposed == True  and self.has_been_conjugated == False:
+            return Transpose(self._B(n))
+        if self.has_been_transposed == True  and self.has_been_conjugated == True:
+            return np.conj(Transpose(self._B(n)))
+    
     def X(self,n):
         if n<0 or n>self.N-1:print('Index error X');error()
         return self.Xs[n]
@@ -642,49 +1001,63 @@ class block_td:
         elif self.num_vect_inds==2:
             self.shape=(self.A(i).shape[0],self.A(i).shape[1],n0,n1)
         elif self.num_vect_inds==3:
-            print('Please visit https://downloadmoreram.com/')
+            #print('Please visit https://downloadmoreram.com/')
             self.shape=(self.A(i).shape[0],self.A(i).shape[1],self.A(i).shape[2],n0,n1)
         self.Block_shape=(len(self.I_al),len(self.I_al))
     
     def do_transposition(self):
-        Na=len(self.Al)
-        Nb=len(self.Bl)
-        Nc=len(self.Cl)
-        Al_new = [Transpose(self.Al[i]).copy() for i in range(Na)] 
-        Bl_new = [Transpose(self.Cl[i]).copy() for i in range(Nc)]
-        Cl_new = [Transpose(self.Bl[i]).copy() for i in range(Nb)]
-        I_al_new = self.I_al.copy()
-        I_bl_new = self.I_cl.copy()
-        I_cl_new = self.I_bl.copy()
+        self.is_zero = self.is_zero.T
+        new_all_slices = []
+        for j in range(self.Block_shape[1]):
+            new_all_slices_j = []
+            for i in range(self.Block_shape[0]):
+                new_all_slices_j+=[self.all_slices[i][j][::-1]]
+            new_all_slices+=[new_all_slices_j]
         
-        self.Al   = None; self.Bl   = None; self.Cl   = None
-        self.I_al = None; self.I_bl = None; self.I_cl = None
-        
-        self.Al = Al_new
-        self.Bl = Bl_new
-        self.Cl = Cl_new
-        self.I_al = I_al_new.copy()
-        self.I_bl = I_bl_new.copy()
-        self.I_cl = I_cl_new.copy()
+        self.all_slices = new_all_slices
         self.has_been_transposed = not self.has_been_transposed
-        self.info(self.diagonal_zeros)
-        
     
     def do_conjugation(self):
-        Na=len(self.Al)
-        Nb=len(self.Bl)
-        Nc=len(self.Cl)
-        Al_new = [np.conj(self.Al[i]).copy() for i in range(Na)] 
-        self.Al   = None
-        Bl_new = [np.conj(self.Bl[i]).copy() for i in range(Nc)]
-        self.Bl   = None
-        Cl_new = [np.conj(self.Cl[i]).copy() for i in range(Nb)]
-        self.Cl   = None
-        
-        self.Al = Al_new
-        self.Bl = Bl_new
-        self.Cl = Cl_new
         self.has_been_conjugated = not self.has_been_conjugated
+    
+    # def old_do_transposition(self):
+    #     Na=len(self.Al)
+    #     Nb=len(self.Bl)
+    #     Nc=len(self.Cl)
+    #     Al_new = [Transpose(self.Al[i]).copy() for i in range(Na)] 
+    #     Bl_new = [Transpose(self.Cl[i]).copy() for i in range(Nc)]
+    #     Cl_new = [Transpose(self.Bl[i]).copy() for i in range(Nb)]
+    #     I_al_new = self.I_al.copy()
+    #     I_bl_new = self.I_cl.copy()
+    #     I_cl_new = self.I_bl.copy()
+        
+    #     self.Al   = None; self.Bl   = None; self.Cl   = None
+    #     self.I_al = None; self.I_bl = None; self.I_cl = None
+        
+    #     self.Al = Al_new
+    #     self.Bl = Bl_new
+    #     self.Cl = Cl_new
+    #     self.I_al = I_al_new.copy()
+    #     self.I_bl = I_bl_new.copy()
+    #     self.I_cl = I_cl_new.copy()
+    #     self.has_been_transposed = not self.has_been_transposed
+    #     self.info(self.diagonal_zeros)
+    
+    # def old_do_conjugation(self):
+    #     Na=len(self.Al)
+    #     Nb=len(self.Bl)
+    #     Nc=len(self.Cl)
+    #     Al_new = [np.conj(self.Al[i]).copy() for i in range(Na)] 
+    #     self.Al   = None
+    #     Bl_new = [np.conj(self.Bl[i]).copy() for i in range(Nc)]
+    #     self.Bl   = None
+    #     Cl_new = [np.conj(self.Cl[i]).copy() for i in range(Nb)]
+    #     self.Cl   = None
+        
+    #     self.Al = Al_new
+    #     self.Bl = Bl_new
+    #     self.Cl = Cl_new
+    #     self.has_been_conjugated = not self.has_been_conjugated
     
     def do_dag(self):
         self.do_transposition()
@@ -746,6 +1119,26 @@ class block_td:
     def A_Adag(self,Ei1,Ei2):
         return block_A_Adag_Interpolated(self,Ei1,Ei2)
     
+    def scalar_add(self, s):
+        return block_td([al + s for al in self.Al],
+                        [bl + s for bl in self.Bl],
+                        [cl + s for cl in self.Cl],
+                        self.I_al.copy(),
+                        self.I_bl.copy(),
+                        self.I_cl.copy(),
+                        diagonal_zeros = self.diagonal_zeros, E_grid = self.E_grid)
+                        
+    def scalar_multiply(self, s):
+        return block_td([al * s for al in self.Al],
+                        [bl * s for bl in self.Bl],
+                        [cl * s for cl in self.Cl],
+                        self.I_al.copy(),
+                        self.I_bl.copy(),
+                        self.I_cl.copy(),
+                        diagonal_zeros = self.diagonal_zeros, E_grid = self.E_grid)
+    
+    
+    
     # def Masked_to_original(self):
         
     #     if hasattr(self, 'BTD_Mask') == False or hasattr(self, 'shapes_mask') == False:
@@ -762,15 +1155,20 @@ class block_sparse:
     def __init__(self, inds, vals,Block_shape,E_grid=None,FoRcE_dTypE = None):
         self.inds = inds.copy()
         self.vals = [v.copy() for v in vals]
-        self.Block_shape=Block_shape
+        
+        self.Block_shape = Block_shape
         self.FoRcE_dTypE = FoRcE_dTypE
+        
+        self.has_been_conjugated = False
+        self.has_been_transposed = False
+        
         self.info()
+        
         if np.any(self.is_zero):
-            self.num_vect_inds = len(vals[0].shape)-2
+            self.num_vect_inds = max([len(vals[i].shape)-2 for i in range(len(vals))])
         else:
             self.num_vec_inds = 0
-        self.has_been_conjugated=False
-        self.has_been_transposed=False
+        
         self.E_grid = E_grid
     
     # def _Block_old_dont_use(self,i,j):
@@ -779,14 +1177,50 @@ class block_sparse:
     #         return self.vals[lind]
     #     else: 
     #         return None
-        
-    def Block(self,i,j):
-        try:
-            lind = self.ind_dict[(i,j)]
-            return self.vals[lind]
-        except KeyError:
-            return None
     
+    
+    def Block(self,i,j):
+        
+        if hasattr(self, 'Symmetric'):
+            try:
+                try:
+                    lind = self.ind_dict[(i,j)]
+                    return self.vals[lind]
+                except:
+                    pass
+                try:
+                    lind = self.ind_dict[(j,i)]
+                    return Transpose(self.vals[lind])
+                except:
+                    pass
+                    
+            except KeyError:
+                return None
+        
+        if self.has_been_transposed == False and self.has_been_conjugated == False:
+            try:
+                lind = self.ind_dict[(i,j)]
+                return self.vals[lind]
+            except KeyError:
+                return None
+        if self.has_been_transposed == False and self.has_been_conjugated == True:
+            try:
+                lind = self.ind_dict[(i,j)]
+                return np.conj(self.vals[lind])
+            except KeyError:
+                return None
+        if self.has_been_transposed == True and self.has_been_conjugated == False:
+            try:
+                lind = self.ind_dict[(j,i)]
+                return Transpose(self.vals[lind])
+            except KeyError:
+                return None
+        if self.has_been_transposed == True and self.has_been_conjugated == True:
+            try:
+                lind = self.ind_dict[(j,i)]
+                return np.conj(Transpose(self.vals[lind]))
+            except KeyError:
+                return None
     
     def info(self):
         inds_d = {}
@@ -812,26 +1246,40 @@ class block_sparse:
             is_zero+=[z]
         
         self.is_zero=np.array(is_zero)
+        
         if self.FoRcE_dTypE is None:
             self.dtype = self.vals[0].dtype
         else:
             self.dtype = self.FoRcE_dTypE
-        
+    
+    
+    
     def do_transposition(self):
-        inds_new = [ self.inds[i][::-1].copy()        for i in range(len(self.inds)) ]
-        vals_new = [ Transpose(self.vals[i] ).copy()  for i in range(len(self.vals)) ]
-        
-        self.inds = inds_new.copy()
-        self.vals = vals_new.copy()
         self.has_been_transposed = not self.has_been_transposed
+        self.is_zero = self.is_zero.T
         self.Block_shape = self.Block_shape[::-1]
-        self.info()
-        
+    
     def do_conjugation(self):
-        vals_new = [ np.conj(self.vals[i] ).copy()  for i in range(len(self.vals))]
-        self.vals = None
-        self.vals = vals_new
-        self.has_been_conjugated = not self.has_been_conjugated
+        self.has_been_conjugated =  not self.has_been_conjugated
+    
+    
+    
+    # def old_do_transposition(self):
+    #     inds_new = [ self.inds[i][::-1].copy()        for i in range(len(self.inds)) ]
+    #     vals_new = [ Transpose(self.vals[i] ).copy()  for i in range(len(self.vals)) ]
+        
+    #     self.inds = inds_new.copy()
+    #     self.vals = vals_new.copy()
+    #     self.has_been_transposed = not self.has_been_transposed
+    #     self.Block_shape = self.Block_shape[::-1]
+    #     self.info()
+        
+    # def old_do_conjugation(self):
+    #     vals_new = [ np.conj(self.vals[i] ).copy()  for i in range(len(self.vals))]
+    #     self.vals = None
+    #     self.vals = vals_new
+    #     self.has_been_conjugated = not self.has_been_conjugated
+    
     def do_dag(self):
         self.do_transposition()
         self.do_conjugation()
@@ -843,7 +1291,10 @@ class block_sparse:
             E_grid_new = self.E_grid.copy()
         else:
             E_grid_new = None
-        return block_sparse(inds_new, vals_new,self.Block_shape, E_grid = E_grid_new)
+        BS = self.Block_shape.copy()
+        if self.has_been_transposed:
+            BS = BS[::-1]
+        return block_sparse(inds_new, vals_new, BS, E_grid = E_grid_new)
     
     def Tr(self,Ei = None):
         if Ei is None:
@@ -1007,7 +1458,6 @@ class block_sparse:
                 
                 never_use_i+=1
             pcount+=1
-            
         
         Out = block_td(Al,Bl,Cl,Ia,Ib,Ic,diagonal_zeros = False, E_grid = self.E_grid)
         Out.BTD_Mask = Mask
@@ -1031,6 +1481,263 @@ class block_sparse:
                      diag[..., si.start + i] =  block_ii[ ... ,i,i]
         
         return diag
+    
+    def get_e_subset(self, idx):
+        #inds, vals,Block_shape,E_grid
+        return block_sparse(self.inds, 
+                            [v[... , idx, :,:] for v in self. vals], 
+                            Block_shape = self.Block_shape,
+                            E_grid = None)
+    
+    def Lorentzian_basis(self, zi,  ei, gamma):
+        # zi sampling points of matrix entries
+        # ei centers of lorentzian basis
+        # gamma width of them
+        res  = block_sparse(self.inds, 
+                            [Matrix_lorentzian_basis(v.astype(np.complex128), zi, ei, gamma) for v in self.vals], 
+                            Block_shape = self.Block_shape,
+                            E_grid = None)
+        
+        
+        res.Lorentzian_basis = True
+        res.ei    = ei
+        res.gamma = gamma
+        
+        return res
+    
+    def tonp(self,slices):
+        return Blocksparse2Numpy(self,slices)
+    
+    def evaluate_Lorentzian_basis(self, E):
+        assert hasattr(self, 'Lorentzian_basis')
+        if isinstance(E, float) or isinstance(E, complex):
+            E =  np.array([E], dtype = np.complex128)
+        res = block_sparse(self.inds, [evaluate_Lorentz_basis_matrix(v, E, self.ei, self.gamma) for v in self.vals],
+                           Block_shape = self.Block_shape, E_grid = None)
+        return res
+    
+    
+    
+    def eig(self,slices, hermitian = False, as_dense = False):
+        if hermitian:
+            EIG = np.linalg.eigh
+        else:
+            EIG = np.linalg.eig
+        
+        print('\n Diagonalising matrix!\n')
+        # meant for taking squareroots of scattering matrices
+        # lazily implemented using scipy.linalg.sqrtm
+        
+        nv = self.num_vect_inds
+        idx,jdx = np.where(self.is_zero != 0)
+        
+        i_min, i_max = idx.min(), idx.max()
+        j_min, j_max = jdx.min(), jdx.max()
+        
+        mat =  []
+        def len_slice(s):
+            return s.stop - s.start
+        
+        S = self.vals[0].shape[:-2]
+        subslices = []
+        
+        for i in range(i_min, i_max+1):
+            lines = []
+            subsubslices = []
+            for j in range(j_min, j_max+1):
+                si, sj = slices[i][j]
+                B = self.Block(i,j)
+                if B is None:
+                    B = np.zeros(S + (len_slice(si), len_slice(sj)), dtype = self.dtype)
+                lines += [B]
+                subsubslices+=[[si, sj]]
+            mat += [lines]
+            subslices+=[subsubslices]
+        
+        sub_mat = np.block(mat)
+        e,v  = EIG(sub_mat)
+        if as_dense:
+            return e, v, slices[i_min][i_min][0].start, slices[i_max][i_max][0].stop-1
+        
+        
+        def zero_slices(inp_slices):
+            new_slices = []
+            zero =  inp_slices[0][0][0].start,inp_slices[0][0][1].start
+            for rows in inp_slices:
+                new_cols = []
+                for cols in rows:
+                    si, sj = cols
+                    sin = slice(si.start - zero[0], si.stop - zero[0]) 
+                    sjn = slice(sj.start - zero[1], sj.stop - zero[1])
+                    new_cols += [ [sin, sjn] ]
+                new_slices += [ new_cols ]
+            return new_slices
+        
+        zeroed_slices = zero_slices(subslices)
+        new_idx            = []
+        new_blocks         = []
+        new_idx_diag       = []
+        new_blocks_diag    = []
+        
+        for i in range(i_max - i_min +1):
+            for j in range(j_max  - j_min +1):
+                new_idx    += [[i + i_min,j + j_min]]
+                si,sj = zeroed_slices[i][j]
+                new_blocks += [v[..., si,sj]]
+                if i == j:
+                    new_idx_diag   += [[i + i_min,j + j_min]]
+                    nvals = si.stop - si.start 
+                    m = np.zeros(S + (nvals , nvals), dtype = e.dtype)
+                    midx  = np.arange(si.stop - si.start)
+                    m[..., midx,midx] = e[..., si]
+                    new_blocks_diag+= [m.copy()]
+        return block_sparse(new_idx_diag, new_blocks_diag, self.Block_shape, E_grid = self.E_grid), block_sparse(new_idx     , new_blocks     , self.Block_shape, E_grid = self.E_grid)
+        
+    def sqrt(self, slices):
+        print('using scipy.linalg.sqrtm + for loops, pretty slow')
+        # meant for taking squareroots of scattering matrices
+        # lazily implemented using scipy.linalg.sqrtm
+        
+        nv = self.num_vect_inds
+        idx,jdx = np.where(self.is_zero != 0)
+        
+        i_min, i_max = idx.min(), idx.max()
+        j_min, j_max = jdx.min(), jdx.max()
+        
+        mat =  []
+        def len_slice(s):
+            return s.stop - s.start
+        
+        S = self.vals[0].shape[:-2]
+        subslices = []
+        
+        for i in range(i_min, i_max+1):
+            lines = []
+            subsubslices = []
+            for j in range(j_min, j_max+1):
+                si, sj = slices[i][j]
+                B = self.Block(i,j)
+                if B is None:
+                    B = np.zeros(S + (len_slice(si), len_slice(sj)), dtype = self.dtype)
+                lines += [B]
+                subsubslices+=[[si, sj]]
+            mat += [lines]
+            subslices+=[subsubslices]
+        
+        sub_mat = np.block(mat)
+        sqrt    = sqrtm_on_KLMij(sub_mat)
+        
+        def zero_slices(inp_slices):
+            new_slices = []
+            zero =  inp_slices[0][0][0].start,inp_slices[0][0][1].start
+            for rows in inp_slices:
+                new_cols = []
+                for cols in rows:
+                    si, sj = cols
+                    sin = slice(si.start - zero[0], si.stop - zero[0]) 
+                    sjn = slice(sj.start - zero[1], sj.stop - zero[1])
+                    new_cols += [ [sin, sjn] ]
+                new_slices += [ new_cols ]
+            return new_slices
+        
+        zeroed_slices = zero_slices(subslices)
+        new_idx       = []
+        new_blocks    = []
+        for i in range(i_max - i_min +1):
+            for j in range(j_max  - j_min +1):
+                new_idx    += [[i + i_min,j + j_min]]
+                si,sj = zeroed_slices[i][j]
+                new_blocks += [sqrt[..., si,sj]]
+        
+        return block_sparse(new_idx, new_blocks, self.Block_shape, E_grid = self.E_grid)
+    
+    def scalar_add(self, s):
+        return block_sparse(self.inds.copy(), 
+                            [v + s for v in self.vals],
+                            self.Block_shape, E_grid = self.E_grid)
+    def scalar_multiply(self, s):
+        return block_sparse(self.inds.copy(), 
+                            [v * s for v in self.vals],
+                            self.Block_shape, E_grid = self.E_grid)
+    
+    def write_txt(self, slices, idx_1, idx_2, prefix = 'numbers', tol = 1e-8):
+        import os
+        os.mkdir(prefix)
+        os.chdir(prefix)
+        print('writing in\n')
+        print(os.getcwd())
+        
+        for i in idx_1:
+            for j in idx_2:
+                with open(str(i)+'_'+str(j) + '.txt', 'w') as f:
+                    f.write('shape: '+ str(slices[-1][-1][0].stop) + ' ' +str(slices[-1][-1][1].stop)  +'\n' )
+                    for count in range(len(self.inds)):
+                        ind,block = self.inds[count], self.vals[count][i,j,:,:]
+                        si, sj = slices[ind[0]][ind[1]]
+                        if isinstance(si, slice):
+                            min_i, min_j = si.start, sj.start
+                        else:
+                            min_i, min_j = si.min(), sj.min()
+                        for I in range(block.shape[0]):
+                            for J in range(block.shape[1]):
+                                value = block[I,J]
+                                rv = value.real#, val.imag
+                                if np.abs(rv) > tol:
+                                    f.write(str(I + min_i + 1) + ' ' + str(J + min_j + 1) + ' ' + str(rv) + '\n')
+        
+        os.chdir('..')
+    
+    # end of block_sparse class
+
+class SuperMatrix:
+    def __init__(self, inds, vals, Block_shape, FoRcE_dTypE = None):
+        self.vals                = vals
+        self.inds                = inds
+        self.Block_shape         = Block_shape
+        self.FoRcE_dTypE         = FoRcE_dTypE
+        self.has_been_conjugated = False
+        self.has_been_transposed = False
+        self.info()
+    
+    def Block(self,i,j):
+        try:
+            lind = self.ind_dict[(i,j)]
+            return self.vals[lind]
+        except KeyError:
+            return None
+        
+    
+    def info(self):
+        inds_d = {}
+        it = 0
+        for ind in self.inds:
+            inds_d.update({(ind[0],ind[1]):it})
+            it+=1
+        
+        self.ind_dict = inds_d
+        it=0
+        is_zero=[]
+        n0=self.Block_shape[0]
+        n1=self.Block_shape[1]
+        
+        for i in range(n0):
+            z = []
+            for j in range(n1):
+                Bij = self.Block(i,j)
+                if Bij is None:
+                    z+=[0]
+                elif all_zero(self.Block(i,j).is_zero):
+                    z+=[0]
+                else:
+                    z+=[1]
+            is_zero+=[z]
+        
+        self.is_zero = np.array(is_zero)
+        
+        if self.FoRcE_dTypE is None:
+            self.dtype = self.vals[0].dtype
+        else:
+            self.dtype = self.FoRcE_dTypE
 
 
 def block_TRACE(A):
@@ -1057,8 +1764,6 @@ def block_TRACEPROD(A1,A2):
     return Res
 
 def block_MATMUL(A1,A2):
-    assert A1.dtype==A2.dtype
-    #assert A1.num_vect_inds==A2.num_vect_inds
     assert A1.Block_shape[1]==A2.Block_shape[0]
     Prod_pat = A1.is_zero.dot(A2.is_zero)
     I,J =  Wh(Prod_pat>0)
@@ -1079,10 +1784,8 @@ def block_MATMUL(A1,A2):
             Res_vals += [First]
     return block_sparse(Res_inds.copy(),Res_vals.copy(),(A1.is_zero.shape[0],A2.is_zero.shape[1]))
 
-def block_MATMUL_threaded(A1,A2,nj = 4):
-    assert A1.dtype==A2.dtype
-    #assert A1.num_vect_inds==A2.num_vect_inds
-    assert A1.Block_shape[1]==A2.Block_shape[0]
+def block_MATMUL_threaded(A1, A2, nj = 4):
+    assert A1.Block_shape[1] == A2.Block_shape[0]
     Prod_pat = A1.is_zero.dot(A2.is_zero)
     I,J =  Wh(Prod_pat>0)
     n_ind =len(I)
@@ -1145,8 +1848,6 @@ def block_ADD(A1,A2):
 
 def block_SUBTRACT(A1,A2):
     assert A1.Block_shape==A2.Block_shape
-    assert A1.dtype==A2.dtype
-    #assert A1.num_vect_inds==A2.num_vect_inds
     
     Sum_pat = A1.is_zero + A2.is_zero
     I,J =  Wh(Sum_pat>0)
@@ -1167,8 +1868,6 @@ def block_SUBTRACT(A1,A2):
 
 def block_MULELEMENTWISE(A1,A2):
     assert A1.Block_shape==A2.Block_shape
-    assert A1.dtype==A2.dtype
-    #assert A1.num_vect_inds==A2.num_vect_inds
     Mul_pat = A1.is_zero * A2.is_zero
     I,J =  Wh(Mul_pat>0)
     Res_inds = []
@@ -1180,11 +1879,8 @@ def block_MULELEMENTWISE(A1,A2):
         Res_vals+=[A1.Block(i,j)*A2.Block(i,j)]
     return block_sparse(Res_inds.copy(),Res_vals.copy(),A1.is_zero.shape)
 
-
 def block_MULELEMENTWISE_TRANSPOSE_LAST(A1,A2):
     assert A1.Block_shape==A2.Block_shape
-    assert A1.dtype==A2.dtype
-    #assert A1.num_vect_inds==A2.num_vect_inds
     Mul_pat = A1.is_zero * A2.is_zero.T
     I,J =  Wh(Mul_pat>0)
     Res_inds = []
@@ -1219,7 +1915,6 @@ def block_SUMALLMATRIXINDECIES_interpolated(A,Ei):
 
 def block_SUMALL_interpolated(A,Ei):
     return np.sum(block_SUMALLMATRIXINDECIES_interpolated(A,Ei))
-
 
 def block_MULELEMENTWISE_interpolated(A1,A2,Ei1,Ei2):
     assert A1.Block_shape==A2.Block_shape
@@ -1421,11 +2116,6 @@ def block_TRACE_different_bs(A,a,S,s):
     
     return Res
 
-        
-
-
-
-
 @jit
 def Interp(E0,E):
     assert E.min()>=E0.min()
@@ -1435,7 +2125,7 @@ def Interp(E0,E):
     ne=len(E)
     ne0=len(E0)
     for j in range(ne):
-        e=E[j]
+        e=E[j].real
         for i in range(ne0-1):
             if E0[i]<=e<E0[i+1]:
                 dE     = E0[i+1]-E0[i]
@@ -1462,7 +2152,7 @@ def Interpolate_block(Arr,f,i):
     else:
         print('Interpolate_block give array that it isnt compatible with\n')
         assert 1==0
-    
+
 def Compare_nd_and_btd(NP, B):
     Bs = B.Block_shape
     T=np.zeros(Bs)
@@ -1506,6 +2196,8 @@ def Blocksparse2Numpy(A,slices,iti_start = 0, itj_start = 0):
         s  = (shape[0],ni,nj)
     elif ls == 4:
         s  = (shape[0],shape[1],ni,nj)
+    elif ls == 5:
+        s  = (shape[0],shape[1],shape[2],ni,nj)
     
     Full = np.zeros(s,A.dtype)
     iti = iti_start
@@ -1525,12 +2217,55 @@ def Blocksparse2Numpy(A,slices,iti_start = 0, itj_start = 0):
                 elif ls == 3: 
                     Full[:,si_new,sj_new] = A.Block(iti,itj)
                 elif ls == 4: 
-                    Full[:,:,si_new,sj_new] = A.Block(iti,itj)            
+                    Full[:,:,si_new,sj_new] = A.Block(iti,itj)
+                elif ls == 5: 
+                    Full[:,:,:,si_new,sj_new] = A.Block(iti,itj)
             itj+=1
         iti+=1
         
     return Full
 
+def todense(block_matrix, slices, idx_i, idx_j):
+    shape = block_matrix.vals[0].shape[:-2]
+    shape = shape + (len(idx_i), len(idx_j))
+    Out = np.zeros(shape, dtype = block_matrix.dtype)
+    def glob_to_loc(I,J):
+        for i, s in enumerate(slices):
+            for j, ss in enumerate(s):
+                si, sj = ss
+                i_start, i_stop = si.start, si.stop
+                j_start, j_stop = sj.start, sj.stop
+                if i_start<=I<i_stop and j_start<=J<j_stop:
+                    return (i,j), (I-i_start, J-j_start)
+        return 'error'
+    
+    where_i = [ glob_to_loc(i,0) for i in idx_i ]
+    where_j = [ glob_to_loc(0,j) for j in idx_j ]
+    
+    Blocks  = [] 
+    loc_idx = [] 
+    sub_idx = []
+    ic = 0
+    
+    for I in where_i:
+        jc = 0
+        for J in where_j:
+            Blocks  += [(I[0][0], J[0][1])]
+            loc_idx += [(I[1][0], J[1][1])]
+            sub_idx += [(ic,jc)]
+            jc += 1
+        ic += 1
+    
+    unique_blocks = unique_list(Blocks)
+    for blox in unique_blocks:
+        idx = find_list(Blocks, blox)
+        B = block_matrix.Block(blox[0],blox[1])
+        if B is not None:
+            for i in idx:
+                ii, jj  = loc_idx[i]
+                ic, jc  = sub_idx[i]
+                Out[..., ic,jc] = B[..., ii, jj]
+    return Out
 
 class sparse_more_d:
     def __init__(self, bs, slices):
@@ -1592,6 +2327,8 @@ class sparse_more_d:
     def get_sparse(self,i=0,j = 0):
         return self.M[self.inds[(i,j)]]
     
+    
+    
 def find_ele_nested_list(ele, l):
     out = [(i, el.index(ele)) for i, el in 
            enumerate(l) if ele in el]
@@ -1617,25 +2354,33 @@ def find_unique_blocks_and_indecies(l,i):
     
     return l,i
 
-
-# @jit
-# def is_close(A1, A2):
-#     if isinstance(A1, np.ndarray) and isinstance(A2, np.ndarray):
-#         return 
-
-
-# Al= [np.random.random((2,2,3,3))]*3
-# Bl= [np.random.random((2,2,3,3))]*2
-# Cl= [np.random.random((2,2,3,3))]*2
-# Ia = [0,1,2]
-# Ib = [0,1]
-# Ic = [0,1]
-# M1 = block_td(Al,Bl,Cl,Ia,Ib,Ic)
-
-# Al= [np.random.random((2,2,3,3))]*3
-# Bl= [np.random.random((2,2,3,3))]*2
-# Cl= [np.random.random((2,2,3,3))]*2
-# M2 = block_td(Al,Bl,Cl,Ia,Ib,Ic)
+def sqrtm_on_KLMij(M):
+    Res = np.zeros(M.shape,dtype = complex)
+    
+    if len(M.shape) == 2:
+        return sqrtm(M)
+    if len(M.shape) == 3:
+        n = len(M[:,0,0])
+        for i in range(n):
+            Res[i] = sqrtm(M[i])
+        return Res
+    if len(M.shape) == 4:
+        n = len(M[:,0,0,0])
+        m = len(M[0,:,0,0])
+        for i in range(n):
+            for j in range(m):
+                Res[i,j] = sqrtm(M[i,j])
+        return Res
+    if len(M.shape) == 5:
+        n = len(M[:,0,0,0,0])
+        m = len(M[0,:,0,0,0])
+        k = len(M[0,0,:,0,0])
+        
+        for i in range(n):
+            for j in range(m):
+                for l in range(k):
+                    Res[i,j,l] = sqrtm(M[i,j,l])
+        return Res
 
 
 
