@@ -15,7 +15,7 @@ import gc
 from funcs import unique_list, find_list
 import multiprocessing as MP
 from scipy.linalg import sqrtm
-from Croy import Matrix_lorentzian_basis, evaluate_Lorentz_basis_matrix
+#from Croy import Matrix_lorentzian_basis, evaluate_Lorentz_basis_matrix
 #import os
 
 
