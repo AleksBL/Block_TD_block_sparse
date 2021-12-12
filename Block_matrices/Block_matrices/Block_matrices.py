@@ -6,20 +6,26 @@ Created on Mon Jan 18 19:35:11 2021
 @author: aleks
 """
 
+import os
+import sys
+file_p = (__file__[:-17])
+sys.path.append(file_p)
+
 import numpy as np
 from scipy import sparse as sp
 from numba import njit, jit, prange
 import gc
-from funcs.funcs import unique_list, find_list
+from siesta_python.funcs import unique_list, find_list
 import multiprocessing as MP
 from scipy.linalg import sqrtm
-from Croy.Croy import Matrix_lorentzian_basis, evaluate_Lorentz_basis_matrix, evaluate_KK_matrix, L_sum
-from Croy.Croy import delta_error_many_linear_lorentzian
-from Croy.Croy import jacobian_delta_error_linear_lorentzian, Lorentzian_basis,jacobian_delta_error_linear_lorentzian_complex
-from Croy.Croy import delta_error_many_linear_lorentzian_complex
-from Croy.Croy import Punish_overlap, grad_Punish_overlap
+from Croy import Matrix_lorentzian_basis, evaluate_Lorentz_basis_matrix, evaluate_KK_matrix, L_sum
+from Croy import delta_error_many_linear_lorentzian
+from Croy import jacobian_delta_error_linear_lorentzian, Lorentzian_basis,jacobian_delta_error_linear_lorentzian_complex
+from Croy import delta_error_many_linear_lorentzian_complex
+from Croy import Punish_overlap, grad_Punish_overlap, gammas_from_centers_vec
 from scipy.signal import hilbert
 from scipy.optimize import minimize
+from functools import partial
 
 Inv   = np.linalg.inv
 Solve = np.linalg.solve
@@ -1552,6 +1558,7 @@ class block_sparse:
             E =  np.array([E], dtype = np.complex128)
         res = block_sparse(self.inds, [evaluate_Lorentz_basis_matrix(v, E, self.ei, self.gamma) for v in self.vals],
                            Block_shape = self.Block_shape, E_grid = None)
+        
         return res
     
     def initialize_lorentzian_fit(self, sampled_xi, NL,fact = 1.0, add_noise_E = False, random_placement = False,
@@ -1699,7 +1706,9 @@ class block_sparse:
                 def f(x):
                     ei = x[0:nl]
                     wi = x[nl:2*nl]
-                    gi = x[2*nl:].reshape((nl, nentries))
+                    #gi = x[2*nl:].reshape((nl, nentries))
+                    gi = gammas_from_centers_vec(ei,wi, f1[ik,:,:], xi.real)
+                    
                     PARS_v = np.zeros((3, nl, nentries))
                     PARS_v[0,:,:] = wi[:, np.newaxis]
                     PARS_v[1,:,:] = ei[:, np.newaxis]
@@ -1708,15 +1717,17 @@ class block_sparse:
                 def jac(x):
                     ei = x[0:nl]
                     wi = x[nl:2*nl]
-                    gi = x[2*nl:].reshape((nl, nentries))
+                    #gi = x[2*nl:].reshape((nl, nentries))
+                    gi = gammas_from_centers_vec(ei,wi, f1[ik,:,:], xi.real)
                     out = jacobian_delta_error_linear_lorentzian(xi.real, f1[ik,:,:].real, ei.real, wi.real, gi.real)
                     grad_PO      = alpha_PO * grad_Punish_overlap(ei,wi)
                     out[0:nl]   += grad_PO[0,:]
                     out[nl:2*nl]+= grad_PO[1,:]
-                    return out
+                    return out[0:2*nl]
             
                 x0 = np.ascontiguousarray(
-                                            np.hstack((i_ei[ik], i_gi[ik], f2[ik].reshape(nl * nentries)))
+                                            np.hstack((i_ei[ik], i_gi[ik]#, f2[ik].reshape(nl * nentries)
+                                                     ))
                                          )
             
             else:
@@ -1724,31 +1735,34 @@ class block_sparse:
                 f_sq_i = np.trapz(f1[ik,:,:].imag**2, xi, axis = 0).sum()
                 
                 def f(x):
+                    #print(x)
                     ei = x[0:nl]
                     wi = x[nl:2*nl]
-                    gi_r = x[2*nl:2*nl+nl*nentries].reshape((nl, nentries))
-                    gi_i = x[2*nl+nl*nentries:].reshape((nl, nentries))
+                    #gi_r = x[2*nl:2*nl+nl*nentries].reshape((nl, nentries))
+                    #gi_i = x[2*nl+nl*nentries:].reshape((nl, nentries))
                     PARS_v = np.zeros((3, nl, nentries), dtype = np.complex128)
                     PARS_v[0,:,:] = wi[:, np.newaxis]
                     PARS_v[1,:,:] = ei[:, np.newaxis]
-                    PARS_v[2,:,:] = gi_r + 1j * gi_i
+                    PARS_v[2,:,:] = gammas_from_centers_vec(ei, wi, f1[ik,:,:], xi.real) #gi_r + 1j * gi_i
                     return f_sq_r + f_sq_i + delta_error_many_linear_lorentzian_complex(xi.real, f1[ik,:,:], PARS_v) + alpha_PO*Punish_overlap(ei,wi)
                 
                 def jac(x):
                     ei = x[0:nl]
                     wi = x[nl:2*nl]
-                    gi = (    x[2*nl:2*nl+nl*nentries].reshape((nl, nentries)) \
-                          +1j*x[2*nl+nl*nentries:    ].reshape((nl, nentries)))
+                    #gi = (    x[2*nl:2*nl+nl*nentries].reshape((nl, nentries)) \
+                    #      +1j*x[2*nl+nl*nentries:    ].reshape((nl, nentries)))
+                    gi = gammas_from_centers_vec(ei,wi, f1[ik,:,:], xi.real)
                     out = jacobian_delta_error_linear_lorentzian_complex(xi.real, f1[ik,:,:], ei.real, wi.real, gi)
                     
                     grad_PO = alpha_PO * grad_Punish_overlap(ei,wi)
                     out[0:nl]   += grad_PO[0,:]
                     out[nl:2*nl]+= grad_PO[1,:]
                     
-                    return out
+                    return out[0:2*nl]
                 
                 x0 = np.ascontiguousarray(
-                                            np.hstack((i_ei[ik], i_gi[ik], f2[ik].real.reshape(nl * nentries),f2[ik].imag.reshape(nl * nentries)))
+                                            np.hstack((i_ei[ik], i_gi[ik]#, f2[ik].real.reshape(nl * nentries),f2[ik].imag.reshape(nl * nentries)
+                                                     ))
                                          )
             
             x_bounds = [(None, None)] * (nl*(nentries*(1+(not fit_real_part))+2))
@@ -1785,11 +1799,17 @@ class block_sparse:
                     for i in range(2 * nl , 2 * nl + nl*nentries*(1 + (not fit_real_part))):
                         x_bounds[i] = gbounds
             
-            x_bounds = tuple(x_bounds)
+            x_bounds = tuple(x_bounds)[0:2*nl]
+            
+            def Constraint(idx,X):
+                return (X[idx+1]-X[idx] - 1e-5)
+                
+            cons = tuple([{'type':'ineq', 'fun':partial(Constraint, JJ)} for JJ in range(nl-1)])
+            
             
             if use_analytical_jac:
                 sol = minimize(f, x0, jac = jac, method = min_method,
-                               options=options, bounds = x_bounds)
+                               options=options, bounds = x_bounds, constraints = cons)
                 
             else:
                 sol = minimize(f, x0,            method = min_method,            
@@ -1798,9 +1818,11 @@ class block_sparse:
             ei = sol.x[0:nl]
             wi = sol.x[nl:2*nl]
             if not fit_real_part:
-                gi = sol.x[2*nl:2*nl+nl*nentries].reshape(nl, nentries) + 1j * sol.x[2*nl+nl*nentries:].reshape(nl, nentries)
+                #gi = sol.x[2*nl:2*nl+nl*nentries].reshape(nl, nentries) + 1j * sol.x[2*nl+nl*nentries:].reshape(nl, nentries)
+                gi = gammas_from_centers_vec(ei,wi, f1[ik,:,:], xi.real)
             else:
-                gi = sol.x[2*nl:2*nl+nl*nentries].reshape(nl, nentries)
+                #gi = sol.x[2*nl:2*nl+nl*nentries].reshape(nl, nentries)
+                gi = gammas_from_centers_vec(ei,wi, f1[ik,:,:].real, xi.real)
             
             out.append((ei,wi,gi))
         
@@ -2032,6 +2054,16 @@ class block_sparse:
         
         os.chdir('..')
         return True
+    
+    def is_hermitian(self):
+        for i in range(self.Block_shape[0]):
+            for j in range(self.Block_shape[1]):
+                if self.Block(i,j) is not None:
+                    if not np.allclose(self.Block(i,j), self.Block(j,i).conj().transpose(0,1,3,2)):
+                        return False
+        return True
+    
+                
 
 
     # end of block_sparse class
@@ -2724,19 +2756,25 @@ def BS_sumaxis(M,axis):
     return block_sparse(M.inds,[v.sum(axis = axis) for v in M.vals], 
                         M.Block_shape, E_grid = M.E_grid)
 
-def abssorted_eig_4inds(M):
-    e,v  = np.linalg.eig(M)
+def abssorted_eig_4inds(M, hermitian = False):
+    if hermitian == True:
+        e,v = np.linalg.eigh(M)
+    else:
+        e,v  = np.linalg.eig(M)
+    
     i1,i2 = M.shape[0:2]
     for I in range(i1):
         for II in range(i2):
             ei = e[I,II,:]
             vi = v[I,II,:,:]
+            #for KK in range(len(vi)):
+            #    idx_2     = np.where(np.abs(vi[:,KK]) == np.abs(vi[:,KK]).max())[0][0]
+            #    vi[:,KK] *= np.exp(-1j * np.log(vi[idx_2,KK]).imag)
             idx = np.argsort(np.abs(ei))[::-1]
             e[I,II,:]     = ei[idx]
             v[I,II,:,:] = vi[:,idx]
     
     return e,v
-
 
 
 # def block_MATMUL_threaded(A1, A2, nj = 4):
