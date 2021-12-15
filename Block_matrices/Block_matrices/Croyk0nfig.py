@@ -1,0 +1,2 @@
+CACHE    = False
+PARALLEL = False

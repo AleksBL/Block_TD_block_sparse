@@ -2,16 +2,24 @@ import numpy as np
 from numpy.linalg import svd
 from numba import njit, prange
 from scipy.signal import hilbert
+import os
+import sys
+file_p = (__file__[:-8])
+sys.path.append(file_p)
 
-@njit(cache = True)
+from Croyk0nfig import CACHE, PARALLEL
+
+
+
+@njit(cache = CACHE)
 def L(E, W, ei):
     return W**2 /( (E - ei)**2  + W**2 )
 
-@njit(cache = True)
+@njit(cache = CACHE)
 def Lvec(E, W, ei):
     return W**2 /( (E - ei)**2  + W**2 )
 
-@njit(cache = True)
+@njit(cache = CACHE)
 def Overlap(ei, wi, ej, wj):
     xi = ei + 1j*wi
     xj = ej + 1j*wj
@@ -21,28 +29,28 @@ def Overlap(ei, wi, ej, wj):
         res = 2j * np.pi/4 * wi * wj *( 1/(xj-np.conj(xi)) + 1/(xi - np.conj(xj)) - 1/(xi - xj) - 1/(xj - xi))
     return res.real
 
-@njit(cache = True)
+@njit(cache = CACHE)
 def d_Overlap_d_eps(ei, wi, ej, wj):
     eps = 1e-5
     return (Overlap(ei + eps, wi, ej, wj) - Overlap(ei - eps, wi, ej, wj)) /(2 * eps)
 
-@njit(cache = True)
+@njit(cache = CACHE)
 def d_Overlap_d_gamma(ei, wi, ej, wj):
     eps = 1e-5
     return (Overlap(ei, wi + eps, ej, wj) - Overlap(ei, wi - eps, ej, wj)) /(2 * eps)
 
-@njit(cache = True)
+@njit(cache = CACHE)
 def d_Overlap_d_eps_same(ei,wi):
     eps = 1e-5
     return (Overlap(ei + eps, wi, ei + eps, wi) - Overlap(ei - eps, wi, ei - eps, wi)) /(2 * eps)
-@njit(cache = True)
+@njit(cache = CACHE)
 def d_Overlap_d_gamma_same(ei,wi):
     eps = 1e-5
     return (Overlap(ei, wi + eps, ei, wi + eps) - Overlap(ei, wi - eps, ei, wi - eps)) /(2 * eps)
 
 atan = np.arctan
 ln = np.log
-@njit(cache = True)
+@njit(cache = CACHE)
 def hat_with_lrtz(x1,x2,x3, ej, gj):
     t1 = (ej - x1)/(x2-x1)  * (-gj) * (atan((ej-x2)/gj) - atan((ej-x1)/gj))
     t2 = gj**2/(2 *(x2-x1)) * (ln((x2 - ej)**2 + gj**2) - ln((x1 - ej)**2 + gj**2))
@@ -51,17 +59,17 @@ def hat_with_lrtz(x1,x2,x3, ej, gj):
     res = t1+t2-t3-t4
     return res.real
 
-@njit(cache = True)
+@njit(cache = CACHE)
 def d_hat_with_lrtz_d_eps(x1,x2,x3,ej,gj):
     eps = 1e-5
     return (hat_with_lrtz(x1,x2,x3, ej + eps, gj) - hat_with_lrtz(x1,x2,x3, ej - eps, gj)) /(2 * eps)
 
-@njit(cache = True)
+@njit(cache = CACHE)
 def d_hat_with_lrtz_d_gamma(x1,x2,x3,ej,gj):
     eps = 1e-5
     return (hat_with_lrtz(x1,x2,x3, ej, gj + eps) - hat_with_lrtz(x1,x2,x3, ej, gj - eps)) /(2 * eps)
 
-@njit(cache = True)
+@njit(cache = CACHE)
 def delta_error_linear_lorentzian(xi, fi, PARS):
     WI = PARS[0]
     EI = PARS[1]
@@ -92,7 +100,7 @@ def delta_error_linear_lorentzian(xi, fi, PARS):
     
     return res - 2 * res2
 
-@njit(cache = True, parallel = True)
+@njit(cache = CACHE, parallel = PARALLEL)
 def delta_error_many_linear_lorentzian(xi, fiv, PARS_v):
     # xiv : ( n), sampling points
     # fiv : (ne, n), values
@@ -103,7 +111,7 @@ def delta_error_many_linear_lorentzian(xi, fiv, PARS_v):
         res += delta_error_linear_lorentzian(xi, fiv[:,i], PARS_v[:, :, i]).real
     return res
 
-@njit(cache = True,parallel = True)
+@njit(cache = CACHE,parallel = PARALLEL)
 def delta_error_many_linear_lorentzian_complex(xi, fiv, PARS_v):
     # xiv : ( n), sampling points
     # fiv : (ne, n), values
@@ -120,7 +128,7 @@ def delta_error_many_linear_lorentzian_complex(xi, fiv, PARS_v):
     
     return res
 
-@njit(cache = True)
+@njit(cache = CACHE)
 def lrz_overlap_matrix(e,w):
     # O is normalised overlap
     # o is the numbers used to normalise
@@ -134,12 +142,12 @@ def lrz_overlap_matrix(e,w):
                 O[i,j] = Overlap(e[i],w[i],e[j],w[j] ) / np.sqrt(o[i] * o[j])
     return O,o
 
-@njit(cache = True)
+@njit(cache = CACHE)
 def Punish_overlap(e,w):
     O,o = lrz_overlap_matrix(e,w)
     return np.tan(O * np.pi/2).sum()
 
-@njit(cache = True)
+@njit(cache =CACHE)
 def d_normed_overlap_d_gamma(ei,wi,ej,wj):
     eps = 1e-5
     Oij_1 = Overlap(ei,wi + eps, ej, wj)
@@ -149,7 +157,7 @@ def d_normed_overlap_d_gamma(ei,wi,ej,wj):
     Ojj   = Overlap(ej,wj,ej,wj)
     return (Oij_1/np.sqrt(Oii_1*Ojj) - Oij_2/np.sqrt(Oii_2*Ojj))/(2*eps)
 
-@njit(cache = True)
+@njit(cache = CACHE)
 def manual_grad_Punish(e,w):
     assert 1 == 0
     eps = 1e-5
@@ -162,7 +170,7 @@ def manual_grad_Punish(e,w):
         grad[1,i] = (Punish_overlap(e, w+de) - Punish_overlap(e,w-de))/(2*eps)
     return grad
 
-@njit(cache = True)
+@njit(cache = CACHE)
 def grad_Punish_overlap(e,w):
     n = len(e)
     grad = np.zeros((2, n))
@@ -180,13 +188,13 @@ def grad_Punish_overlap(e,w):
                 
     return grad
 
-@njit(cache = True)
+@njit(cache = CACHE)
 def d_tan_dx(x):
     return np.pi/2*(1/np.cos(x*np.pi/2))**2
 
 
 
-@njit(cache = True, parallel = True)
+@njit(cache = CACHE, parallel = PARALLEL)
 def jacobian_delta_error_linear_lorentzian(xi, fiv, ei, wi, Gi_v):
     nb   = len(fiv[0,:])
     res  = np.zeros(len(ei) + len(wi) + len(Gi_v[:,0]) * len(Gi_v[0,:]))
@@ -243,7 +251,7 @@ def jacobian_delta_error_linear_lorentzian(xi, fiv, ei, wi, Gi_v):
     
     return res
 
-@njit#(cache = True)
+@njit(cache = CACHE)
 def jacobian_delta_error_linear_lorentzian_complex(xi, fiv, ei, wi, Gi_v):
     fiv_i = fiv.imag
     fiv_r = fiv.real
@@ -275,7 +283,7 @@ def ez_wrap(xi, fiv, ei, wi, Gi_v):
 # def L1L2(x):
 #     return L(x , 0.01, -0.0) * L(x , 0.01001, 0)
 
-@njit(cache = True)
+@njit(cache = CACHE)
 def L_sum(E, var):
     Wi = var[0]
     ei = var[1]
@@ -287,7 +295,7 @@ def L_sum(E, var):
     return res
 
 
-@njit(cache = True)
+@njit(cache = CACHE)
 def Lorentzian_basis(f, zi, ei, gamma):
     assert len(zi) == len(ei) == len(gamma)
     nl =  len(zi)
@@ -297,7 +305,7 @@ def Lorentzian_basis(f, zi, ei, gamma):
             B[i,j] = L(zi[i], gamma[j], ei[j])
     return np.linalg.inv(B).dot(f)
 
-@njit(cache = True)
+@njit(cache = CACHE)
 def Matrix_lorentzian_basis(M, zi, ei, gamma):
     res = np.zeros(M.shape, dtype = M.dtype)
     #print(zi.shape, ei.shape, gamma.shape)
@@ -311,7 +319,7 @@ def Matrix_lorentzian_basis(M, zi, ei, gamma):
                 res[ik, :, i, j] = Lorentzian_basis(M[ik, :, i, j], zi, ei[ik], gamma[ik])
     return res
 
-@njit(cache = True)
+@njit(cache = CACHE)
 def evaluate_Lorentz_basis_matrix(M, E, ei, gamma):
     nk = M.shape[0]
     ne = M.shape[1]
@@ -326,7 +334,7 @@ def evaluate_Lorentz_basis_matrix(M, E, ei, gamma):
     
     return res
 
-@njit(cache = True)
+@njit(cache = CACHE)
 def evaluate_KK_matrix(M, E, ei, gamma):
     nk = M.shape[0]
     ne = M.shape[1]
@@ -340,7 +348,7 @@ def evaluate_KK_matrix(M, E, ei, gamma):
                 res[ik,:,i,j] = KK_L_sum(E, pars)
     return res
 
-@njit(cache = True)
+@njit(cache = CACHE)
 def KK_L_sum(E, var):
     Wi = var[0]
     ei = var[1]
@@ -355,7 +363,7 @@ def KK_L_sum(E, var):
 
 
 offset_E = 1.0
-@njit(cache = True)
+@njit(cache = CACHE)
 def gamma_from_centres_matrix(ei,wi):
     n = len(ei)
     Mat = np.zeros((n,n),dtype = np.complex128)
@@ -364,7 +372,7 @@ def gamma_from_centres_matrix(ei,wi):
             Mat[i,j] = Overlap(ei[i], wi[i], ei[j], wi[j])
     return Mat
 
-@njit(cache = True)
+@njit(cache = CACHE)
 def gamma_from_centers_RHS(ei, wi, fi, xi):
     n = len(ei)
     nf = len(fi)

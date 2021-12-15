@@ -10,10 +10,10 @@ import os
 import sys
 file_p = (__file__[:-17])
 sys.path.append(file_p)
+from Block_Matrices_k0nfig import CACHE, PARALLEL, NUMBA
 
 import numpy as np
 from scipy import sparse as sp
-from numba import njit, jit, prange
 import gc
 from siesta_python.funcs import unique_list, find_list
 import multiprocessing as MP
@@ -26,6 +26,13 @@ from Croy import Punish_overlap, grad_Punish_overlap, gammas_from_centers_vec
 from scipy.signal import hilbert
 from scipy.optimize import minimize
 from functools import partial
+
+if NUMBA:
+    from numba import njit, jit, prange
+else:
+    from dummy_decorators import njit, jit, prange
+
+
 
 Inv   = np.linalg.inv
 Solve = np.linalg.solve
@@ -147,7 +154,7 @@ def slices_to_npslices(Slices):
             np_slices[2,i,1,:]  = jc.start,jc.stop
     return np_slices
 
-@njit(cache = True)
+@njit(cache = CACHE)
 def delete_workaround(arr, num):
     nn = len(num)
     na = len(arr)
@@ -165,7 +172,7 @@ def delete_workaround(arr, num):
     
     return arr[res]
 
-@njit(cache = True)
+@njit(cache = CACHE)
 def Build_BTD_purenp(I, J, V, Slices):
     #Input from scipy.spars.find(A), together with the way the matrix is partitioned into blocks
     # Al = List(); Bl =List(); Cl = List()
@@ -282,7 +289,7 @@ def Build_BS(A,P):
     
     return inds, vals
 
-@njit(cache = True)
+@njit(cache = CACHE)
 def Build_BS_purenp(I, J, val, P):
     vals = []#List()
     inds = []#List()
@@ -348,7 +355,7 @@ def Build_BS_purenp(I, J, val, P):
 #     for i in range(len(vv)):
 #         Build_BS(A,list(P))
 
-@njit(parallel = False, cache = True)
+@njit(parallel = PARALLEL, cache = CACHE)
 def _Build_BTD_vectorised(Iv, Jv, Vv, Slices):
     nv = Iv.shape[0]
     dt = Vv.dtype
@@ -399,7 +406,7 @@ def _Build_BTD_vectorised(Iv, Jv, Vv, Slices):
     
     return Alv, Blv, Clv
 
-@njit(cache = True)
+@njit(cache = CACHE)
 def ind_in_inds(ind, inds, find_ind = False):
     for i in range(len(inds)):
         if (ind == inds[i]).all():
@@ -408,7 +415,7 @@ def ind_in_inds(ind, inds, find_ind = False):
             return True
     return False
 
-@njit(parallel = False, cache = True)
+@njit(parallel = PARALLEL, cache = CACHE)
 def _Build_BS_vectorised(Iv, Jv, Vv, P):
     nv = Iv.shape[0]
     dt = Vv.dtype
@@ -1208,6 +1215,12 @@ class block_sparse:
     #     else: 
     #         return None
     
+    def throw_away_less_than(self, tol = 1e-15):
+        nb = len(self.vals)
+        for i in range(nb-1, -1,-1):
+            if (np.abs(self.vals[i])<tol).all():
+                del self.vals[i], self.inds[i]
+        self.info()
     
     def Block(self,i,j):
         
@@ -1672,7 +1685,8 @@ class block_sparse:
                                    gbounds = (None, None),
                                    tol = 1e-3, options = {}, fit_real_part = True, 
                                    specific_bounds = None, alpha_PO = 0.0, 
-                                   force_hermitian = True):
+                                   force_hermitian = True,
+                                   cons = 'ascending'):
         
         assert hasattr(Lrz, 'Lorentzian_basis')
         print('\n--------------------\nOptimizing Lorentzian Expansion\n--------------------\n')
@@ -1803,10 +1817,13 @@ class block_sparse:
             
             def Constraint(idx,X):
                 return (X[idx+1]-X[idx] - 1e-5)
+            
                 
-            cons = tuple([{'type':'ineq', 'fun':partial(Constraint, JJ)} for JJ in range(nl-1)])
-            
-            
+            if cons=='ascending':
+                cons = tuple([{'type':'ineq', 'fun':partial(Constraint, JJ)} for JJ in range(nl-1)])
+            else:
+                cons = ()
+                            
             if use_analytical_jac:
                 sol = minimize(f, x0, jac = jac, method = min_method,
                                options=options, bounds = x_bounds, constraints = cons)
@@ -2117,7 +2134,7 @@ class SuperMatrix:
             self.dtype = self.vals[0].dtype
         else:
             self.dtype = self.FoRcE_dTypE
-
+        
 
 def block_TRACE(A):
     n=A.is_zero.shape[0]
