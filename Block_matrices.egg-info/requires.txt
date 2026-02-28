@@ -1,0 +1,5 @@
+numpy
+numba
+siesta_python
+scipy
+matplotlib

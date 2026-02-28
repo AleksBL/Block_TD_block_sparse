@@ -243,7 +243,6 @@ def delta_error_linear_lorentzian_old(xi, fi, PARS):
     
     eps  = offset_E + .0 # make it agree with jacobian of error
     res2 = 0.0
-    
     x1,x2,x3 = xi[0]-eps, xi[0], xi[1]
     for j in range(nl):
         res2 += hat_with_lrtz(x1, x2, x3, EI[j], WI[j]) * fi[0] * GI[j]
@@ -253,8 +252,8 @@ def delta_error_linear_lorentzian_old(xi, fi, PARS):
     fcut_l = np.zeros(nl)
     for j in range(nl):
         res2 += hat_with_lrtz(x1, x2, x3, EI[j], WI[j]) * fi[ns-1] * GI[j]
-        fcut_l[j] = np.sqrt(GI[j]**2/Lrz_cutoff - GI[j]**2)
-    
+        # fcut_l[j] = np.sqrt(GI[j]**2/Lrz_cutoff - GI[j]**2) # ERROR ABL 07.01.2026, Seems nonconsequencial though
+        fcut_l[j] = np.sqrt(WI[j]**2/Lrz_cutoff - WI[j]**2)
     dij = np.zeros((ns, nl))
     for i in range(ns):
         for j in range(nl):
@@ -271,7 +270,7 @@ def delta_error_linear_lorentzian_old(xi, fi, PARS):
 @njit(cache = CACHE, fastmath = FASTMATH)
 def delta_error_linear_lorentzian(xi, fi, PARS, exc_idx = None):
     if exc_idx is None:
-        return delta_error_linear_lorentzian_old(xi,fi,PARS)
+         return delta_error_linear_lorentzian_old(xi,fi,PARS)
     WI = PARS[0]
     EI = PARS[1]
     GI = PARS[2]
@@ -296,7 +295,8 @@ def delta_error_linear_lorentzian(xi, fi, PARS, exc_idx = None):
     for j in range(nl):
         if (ns-1) not in exc_idx[j]:
             res2 += hat_with_lrtz(x1, x2, x3, EI[j], WI[j]) * fi[ns-1] * GI[j]
-        fcut_l[j] = np.sqrt(GI[j]**2/Lrz_cutoff - GI[j]**2)
+        # fcut_l[j] = np.sqrt(GI[j]**2/Lrz_cutoff - GI[j]**2) ## WRONG???? ABL 07.01.2026, Seems nonconsequencial though
+        fcut_l[j] = np.sqrt(WI[j]**2/Lrz_cutoff - WI[j]**2) ## WRONG???? ABL 07.01.2026
     
     dij = np.zeros((ns, nl))
     for i in range(ns):
@@ -320,7 +320,7 @@ def delta_error_linear_lorentzian(xi, fi, PARS, exc_idx = None):
     return res - 2 * res2
 
 # Extension of the above function to matrix valued samplings f
-@njit(cache = CACHE, parallel = PARALLEL, fastmath = FASTMATH)
+# @njit(cache = CACHE, parallel = PARALLEL, fastmath = FASTMATH)
 def delta_error_many_linear_lorentzian(xi, fiv, PARS_v, exc_idx = None):
     # xiv :   (ne), sampling points
     # fiv :   (ne, nb), values
@@ -331,8 +331,8 @@ def delta_error_many_linear_lorentzian(xi, fiv, PARS_v, exc_idx = None):
         res += delta_error_linear_lorentzian(xi, fiv[:,i], PARS_v[:, :, i], exc_idx = exc_idx).real
     return res
     
-# Extension to complex values
-@njit(cache = CACHE,parallel = PARALLEL, fastmath = FASTMATH)
+# Extension to complex value
+# @njit(cache = CACHE,parallel = PARALLEL, fastmath = FASTMATH)
 def delta_error_many_linear_lorentzian_complex(xi, fiv, PARS_v, exc_idx = None):
     # xiv : ( n), sampling points
     # fiv : (ne, n), values

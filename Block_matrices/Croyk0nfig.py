@@ -1,8 +1,8 @@
 CACHE    = False     # numba
 PARALLEL = True      # numba
 FASTMATH = True      # numba
-dE_fitting = .5      # ramp outside of fitting window
-L_cutoff   = 2.5e-5  # cutoff for tails of Lorentzian basis functions
+dE_fitting = 0.5      # ramp outside of fitting window
+L_cutoff   = 2.5e-4  # cutoff for tails of Lorentzian basis functions
 direct_eig_n     = 5 # for direct eigenvalue PSD enforcement
 direct_eig_nW    = 5 
 direct_eig_lbtol =-1e-2
