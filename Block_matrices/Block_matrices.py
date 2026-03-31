@@ -1926,8 +1926,8 @@ class block_sparse:
                                          )
                 
             else:
-                f_sq_r = np.trapz(f1[ik,:,:].real**2, xi, axis = 0).sum()
-                f_sq_i = np.trapz(f1[ik,:,:].imag**2, xi, axis = 0).sum()
+                f_sq_r = np.trapezoid(f1[ik,:,:].real**2, xi, axis = 0).sum()
+                f_sq_i = np.trapezoid(f1[ik,:,:].imag**2, xi, axis = 0).sum()
                 
                 def f(x):
                     ei = x[0:nl]
