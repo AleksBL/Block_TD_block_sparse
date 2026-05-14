@@ -55,6 +55,13 @@ def L(E, W, ei):
 @njit(cache = CACHE, fastmath = FASTMATH)
 def Lvec(E, W, ei):
     return W**2 /( (E - ei)**2  + W**2 )
+@njit(cache = CACHE, fastmath = FASTMATH)
+def Lvec_opt(E, W, ei, G=1.0):
+    W2 = W**2
+    _A = (E - ei)**2
+    _A += W2
+    return (G*W2 )/_A 
+
 
 # Overlap between two Lorentzians
 # Used in the Punish overlap rutine
@@ -592,6 +599,57 @@ def L_sum(E, var):
         res += Gi[l] * Lvec(E, Wi[l], ei[l])
     return res
 
+@njit(cache = CACHE, fastmath = FASTMATH)
+def L_sum_opt(E, var, res):
+    Wi = var[0]
+    ei = var[1]
+    Gi = var[2]
+    nl = len(var[0,:])
+    # res = np.zeros(len(E), dtype = np.complex128)
+    res[:] = 0.0
+    ne = len(E)
+    W2 = Wi**2
+    GW2 = Gi*W2
+    for ie in range(ne):
+        acc = 0.0 + 0.0j
+        e = E[ie]
+        for l in range(nl):
+            w2l = W2[l]
+            A = e - ei[l]
+            A*= A 
+            A += w2l
+            A = (GW2[l])/A
+            acc +=  A 
+        res[ie] = acc
+
+@njit(cache = CACHE, fastmath = FASTMATH)
+def KK_L_sum_opt(E, var, res):
+    Wi = var[0]
+    ei = var[1]
+    Gi = var[2]
+    nl = len(var[0,:])
+    res[:] = 0.0
+    ne = len(E)
+    W2 = Wi**2
+    GW2 = Gi*W2
+    for ie in range(ne):
+        acc = 0.0 + 0.0j
+        e = E[ie]
+        for l in range(nl):
+            w2l = W2[l]
+            A = e - ei[l]
+            KKf = A / Wi[l]
+            A*= A 
+            A += w2l
+            A = (GW2[l])/A
+            acc +=  (A*KKf) 
+        res[ie] = acc
+
+    
+
+
+
+
 # Find the best fit some function f sampled in zi, when you constrain the values of ei and wi (gamma in the function)
 @njit(cache = CACHE, fastmath = FASTMATH)
 def Lorentzian_basis(f, zi, ei, gamma):
@@ -653,6 +711,47 @@ def evaluate_Lorentz_basis_matrix(M, E, ei, gamma, tol = 1e-15):
                 if (np.abs(M[ik,:,i,j])>tol).any():
                     pars = np.vstack((gamma[ik], ei[ik], M[ik,:,i,j]))
                     res[ik,:,i,j] = L_sum(E, pars)
+    return res
+
+@njit(cache = CACHE, fastmath = FASTMATH)
+def evaluate_Lorentz_basis_matrix_opt(M, E, ei, gamma, res, tol = 1e-15, fact = 1.0):
+    nk = M.shape[0]
+    ne = M.shape[1]
+    ni = M.shape[2]
+    nj = M.shape[3]
+    #res = np.zeros((nk, len(E), ni, nj), dtype = np.complex128)
+    pars = np.zeros((3, ei.shape[1]),dtype=np.complex128)
+    tmp_res = np.zeros(len(E), dtype=np.complex128)
+    
+    for ik in range(nk):
+        for i in range(ni):
+            for j in range(nj):
+                if (np.abs(M[ik,:,i,j])>tol).any():
+                    pars[0] = gamma[ik]
+                    pars[1] = ei[ik]
+                    pars[2] = M[ik,:,i,j]*fact
+                    L_sum_opt(E, pars, tmp_res)
+                    res[ik,:,i,j] = tmp_res
+    return res
+
+@njit(cache = CACHE, fastmath = FASTMATH)
+def evaluate_KK_matrix_opt(M, E, ei, gamma,res, tol = 1e-15, fact = 1.0):
+    nk = M.shape[0]
+    ne = M.shape[1]
+    ni = M.shape[2]
+    nj = M.shape[3]
+    # res = np.zeros((nk, len(E), ni, nj), dtype = np.complex128)
+    pars = np.zeros((3, ei.shape[1]),dtype=np.complex128)
+    tmp_res = np.zeros(len(E), dtype=np.complex128)
+    for ik in range(nk):
+        for i in range(ni):
+            for j in range(nj):
+                if (np.abs(M[ik,:,i,j])>tol).any():
+                    pars[0] = gamma[ik]
+                    pars[1] = ei[ik]
+                    pars[2] = M[ik,:,i,j]*fact
+                    KK_L_sum_opt(E, pars, tmp_res)
+                    res[ik,:,i,j] += tmp_res
     return res
 
 @njit(cache = CACHE, fastmath = FASTMATH)
